@@ -882,6 +882,8 @@ export default function App() {
                               const isLate = status === 'completed' && as.deadline && sub?.completionDate > as.deadline;
                               const today = new Date().toISOString().split('T')[0];
                               const diff = as.deadline ? Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
+                              const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
+                              const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
 
                               if (!isTarget) return (
                                 <div key={as.id} className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-50/50 border border-slate-100 opacity-40">
@@ -909,9 +911,14 @@ export default function App() {
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0 ml-2">
-                                    {activeTab === 'matrix' && as.deadline && diff !== null && (
-                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap ${diff < 0 ? 'bg-red-100 text-red-600 border-red-200' : diff === 0 ? 'bg-orange-100 text-orange-600 border-orange-200' : diff <= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/60 text-current border-current/20'}`}>
-                                        {diff < 0 ? `D+${Math.abs(diff)}` : diff === 0 ? 'D-Day' : `D-${diff}`}
+                                    {activeTab === 'matrix' && as.deadline && diff !== null && diff >= 0 && (
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap ${diff === 0 ? 'bg-orange-100 text-orange-600 border-orange-200' : diff <= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/60 text-current border-current/20'}`}>
+                                        {diff === 0 ? '마감!' : `D-${diff}`}
+                                      </span>
+                                    )}
+                                    {isOverdue && (
+                                      <span className="flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap bg-red-100 text-red-600 border-red-200">
+                                        <AlertTriangle size={8} className="shrink-0"/>{overDiff}일 초과
                                       </span>
                                     )}
                                     {activeTab === 'memorization' && status !== 'not_started' && (
@@ -949,7 +956,6 @@ export default function App() {
                                 {userRole === 'master' && (
                                   <div className="flex gap-1 leading-none">
                                     <button onClick={(e) => { e.stopPropagation(); setBulkSelectedDate(new Date().toISOString().split('T')[0]); setBulkSelectedStatus(null); setBulkDatePopup({ item: as, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }} className="px-1.5 py-0.5 bg-white border rounded text-[9px] font-black text-slate-600 hover:bg-slate-50 leading-none">일괄</button>
-                                    <button onClick={() => { setEditItemId(as.id); setEditItemData({ ...as }); }} className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-[9px] font-black text-indigo-600 hover:bg-indigo-100 transition-all leading-none shadow-sm">인원</button>
                                   </div>
                                 )}
                               </div>
@@ -960,10 +966,11 @@ export default function App() {
                                 const isOver = diff < 0;
                                 const isToday = diff === 0;
                                 const isClose = diff > 0 && diff <= 3;
+                                if (isOver) return null;
                                 return (
-                                  <span className={`mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none ${isOver ? 'bg-red-100 text-red-600 border border-red-200' : isToday ? 'bg-orange-100 text-orange-600 border border-orange-200' : isClose ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
+                                  <span className={`mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none ${isToday ? 'bg-orange-100 text-orange-600 border border-orange-200' : isClose ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
                                     <Calendar size={9} />
-                                    {isOver ? `D+${Math.abs(diff)}` : isToday ? 'D-Day' : `D-${diff}`}
+                                    {isToday ? '마감!' : `D-${diff}`}
                                   </span>
                                 );
                               })()}
@@ -1000,6 +1007,9 @@ export default function App() {
                             if (!(as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id)))) return <td key={as.id} className="p-4 bg-slate-50/30 text-center font-bold text-[9px] text-slate-300 whitespace-nowrap leading-none">대상이 아닙니다.</td>;
                             const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
                             const isLate = status === 'completed' && as.deadline && sub.completionDate > as.deadline;
+                            const today = new Date().toISOString().split('T')[0];
+                            const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
+                            const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
 
                             return (
                               <td key={as.id} className="p-4 text-center relative">
@@ -1013,6 +1023,12 @@ export default function App() {
                                     <>{cfg?.icon && React.createElement(cfg.icon, { size: 18 })}{status !== 'not_started' && <span className="text-[8px] font-black mt-0.5">{cfg?.label}</span>}</>
                                   )}
                                 </div>
+                                {isOverdue && (
+                                  <div className="mt-1 flex items-center justify-center gap-0.5 px-1.5 py-0.5 bg-red-100 rounded-lg border border-red-200 w-fit mx-auto">
+                                    <AlertTriangle size={8} className="text-red-500 shrink-0" />
+                                    <span className="text-[8px] font-black text-red-600 leading-none">{overDiff}일 초과</span>
+                                  </div>
+                                )}
                                 {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
                                   <div className="mt-1 leading-none">
                                     {inlineDateEditKey === subKey ? (
