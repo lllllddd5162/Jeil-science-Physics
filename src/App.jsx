@@ -3131,7 +3131,7 @@ export default function App() {
                                 <>
                                   {grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600">{grade.icon} {grade.label}</span>}
                                   <div className="text-right">
-                                    <p className={`text-base font-black leading-none ${score>=80?'text-blue-600':score>=60?'text-amber-500':'text-red-500'}`}>{score}점</p>
+                                    <p className="text-base font-black leading-none text-slate-800">{score}점</p>
                                     {diff !== null && (
                                       <p className={`text-[9px] font-bold mt-0.5 leading-none ${parseFloat(diff)>0?'text-emerald-500':parseFloat(diff)<0?'text-red-400':'text-slate-400'}`}>
                                         평균 대비 {parseFloat(diff)>0?'+':''}{diff}
