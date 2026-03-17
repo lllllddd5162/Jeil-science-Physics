@@ -1245,12 +1245,14 @@ export default function App() {
             }, {});
 
             const prevMonth = () => {
-              const d = new Date(calYear, calMonthIdx - 2, 1);
-              setProgressCalMonth(d.toISOString().slice(0, 7));
+              let y = calYear, m = calMonthIdx - 1;
+              if (m < 1) { m = 12; y -= 1; }
+              setProgressCalMonth(`${y}-${String(m).padStart(2, '0')}`);
             };
             const nextMonth = () => {
-              const d = new Date(calYear, calMonthIdx, 1);
-              setProgressCalMonth(d.toISOString().slice(0, 7));
+              let y = calYear, m = calMonthIdx + 1;
+              if (m > 12) { m = 1; y += 1; }
+              setProgressCalMonth(`${y}-${String(m).padStart(2, '0')}`);
             };
 
             const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
@@ -1301,7 +1303,27 @@ export default function App() {
                     ))}
                   </div>
                   <div className="grid grid-cols-7">
-                    {Array.from({ length: firstDay }).map((_, i) => <div key={'e' + i} className="border-b border-r border-slate-50 min-h-[64px]" />)}
+                    {Array.from({ length: firstDay }).map((_, i) => {
+                      const prevMonthDays = new Date(calYear, calMonthIdx - 1, 0).getDate();
+                      const day = prevMonthDays - firstDay + i + 1;
+                      let prevY = calYear, prevM = calMonthIdx - 1;
+                      if (prevM < 1) { prevM = 12; prevY -= 1; }
+                      const dateStr = `${prevY}-${String(prevM).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                      const dayPlans = plansByDate[dateStr] || [];
+                      return (
+                        <div key={'prev'+i} onClick={() => { setProgressCalMonth(`${prevY}-${String(prevM).padStart(2,'0')}`); setProgressSelectedDate(dateStr); }}
+                          className="border-b border-r border-slate-50 min-h-[64px] p-1.5 cursor-pointer hover:bg-slate-50 transition-all bg-slate-50/30">
+                          <div className={`text-xs font-black w-6 h-6 flex items-center justify-center rounded-full mb-1 ${i === 0 ? 'text-red-200' : 'text-slate-300'}`}>{day}</div>
+                          {dayPlans.length > 0 && (
+                            <div className="space-y-0.5">
+                              {dayPlans.slice(0, 2).map(p => (
+                                <div key={p.id} className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate opacity-40 ${p.done ? 'bg-teal-100 text-teal-700 line-through' : 'bg-indigo-50 text-indigo-600'}`}>{p.subject} {p.unit}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                     {Array.from({ length: daysInMonth }).map((_, i) => {
                       const day = i + 1;
                       const dateStr = `${calYear}-${String(calMonthIdx).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
@@ -1342,6 +1364,26 @@ export default function App() {
                                   </div>
                                 </div>
                               )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {Array.from({ length: (7 - (firstDay + daysInMonth) % 7) % 7 }).map((_, i) => {
+                      const day = i + 1;
+                      let nextY = calYear, nextM = calMonthIdx + 1;
+                      if (nextM > 12) { nextM = 1; nextY += 1; }
+                      const dateStr = `${nextY}-${String(nextM).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                      const dayPlans = plansByDate[dateStr] || [];
+                      return (
+                        <div key={'next'+i} onClick={() => { setProgressCalMonth(`${nextY}-${String(nextM).padStart(2,'0')}`); setProgressSelectedDate(dateStr); }}
+                          className="border-b border-r border-slate-50 min-h-[64px] p-1.5 cursor-pointer hover:bg-slate-50 transition-all bg-slate-50/30">
+                          <div className={`text-xs font-black w-6 h-6 flex items-center justify-center rounded-full mb-1 ${(firstDay + daysInMonth + i) % 7 === 6 ? 'text-blue-200' : 'text-slate-300'}`}>{day}</div>
+                          {dayPlans.length > 0 && (
+                            <div className="space-y-0.5">
+                              {dayPlans.slice(0, 2).map(p => (
+                                <div key={p.id} className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate opacity-40 ${p.done ? 'bg-teal-100 text-teal-700 line-through' : 'bg-indigo-50 text-indigo-600'}`}>{p.subject} {p.unit}</div>
+                              ))}
                             </div>
                           )}
                         </div>
