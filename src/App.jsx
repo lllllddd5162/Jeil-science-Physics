@@ -573,11 +573,11 @@ export default function App() {
                   <h2 className="text-xl font-bold flex items-center gap-2">{activeTab === 'matrix' ? <ClipboardCheck /> : <BrainCircuit />} 실시간 학습 현황</h2>
                 </div>
                 <div className="overflow-x-auto relative">
-                  <table className="w-full text-left border-collapse table-fixed">
+                  <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50/50 text-slate-400">
                       <tr>
-                        <th className="p-5 font-black text-[10px] uppercase sticky left-0 bg-slate-50 z-40 w-44 border-r text-center">학생 정보</th>
-                        <th className="p-5 font-black text-[10px] uppercase sticky left-[176px] bg-slate-50 z-40 w-24 border-r text-center">진척도</th>
+                        <th className="p-5 font-black text-[10px] uppercase sticky left-0 bg-slate-50 z-40 w-[160px] min-w-[160px] max-w-[160px] border-r text-center leading-tight">학생 정보</th>
+                        <th className="p-5 font-black text-[10px] uppercase sticky left-[160px] bg-slate-50 z-40 w-[100px] min-w-[100px] max-w-[100px] border-r text-center leading-tight">진척도</th>
                         {(activeTab === 'matrix' ? assignments : memoItems).map((as) => (
                           <th key={as.id} className="p-5 min-w-[160px] border-b relative group text-center">
                             <div className="flex flex-col text-center">
@@ -597,7 +597,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 text-slate-800">
                       {visibleStudentsFiltered.map(s => (
                         <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
-                          <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white z-30 border-r text-left w-44">
+                          <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white group-hover:bg-slate-50 z-30 border-r text-left w-[160px] min-w-[160px] max-w-[160px]">
                             <div className="flex items-center justify-between w-full mb-1">
                               <span className="truncate text-sm font-black">{s.name}</span>
                               <button onClick={() => setSelectedStudent(s)}><Search size={14} className="text-slate-300 hover:text-indigo-600" /></button>
@@ -607,7 +607,7 @@ export default function App() {
                               {s.highSchool && <span className="text-[8px] text-slate-400 font-bold bg-slate-100 px-1 py-0.5 rounded truncate max-w-[80px]">{s.highSchool}</span>}
                             </div>
                           </td>
-                          <td className="p-5 sticky left-[176px] bg-white z-30 border-r text-center w-24">
+                          <td className="p-5 sticky left-[160px] bg-white group-hover:bg-slate-50 z-30 border-r text-center w-[100px] min-w-[100px] max-w-[100px]">
                             <div className="flex flex-col text-center">
                               <span className={`${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'} text-[10px] font-black`}>{(activeTab === 'matrix' ? (stats.assign[s.id]?.label || '-') : (stats.memo[s.id]?.label || '-'))}</span>
                               <span className={`${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'} text-[9px] font-black`}>{(activeTab === 'matrix' ? (stats.assign[s.id]?.percent || '0.0') : (stats.memo[s.id]?.percent || '0.0'))}%</span>
@@ -659,11 +659,11 @@ export default function App() {
               <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-6 border-b font-bold text-slate-800 flex items-center gap-2 justify-center"><Calculator className="text-orange-500" /> 종합 성적표 분석</div>
                 <div className="overflow-x-auto relative">
-                  <table className="w-full text-center border-collapse table-fixed">
+                  <table className="w-full text-center border-collapse">
                     <thead className="bg-slate-50/50 text-slate-400">
                       <tr>
-                        <th className="p-5 font-black text-[10px] sticky left-0 bg-slate-50 z-40 w-32 border-r text-center leading-none">이름</th>
-                        <th className="p-5 font-black text-orange-600 text-[10px] border-r w-24 text-center sticky left-[128px] bg-orange-50/30 z-40 leading-none">평균</th>
+                        <th className="p-5 font-black text-[10px] sticky left-0 bg-slate-50 z-40 w-[120px] min-w-[120px] max-w-[120px] border-r text-center leading-none">이름</th>
+                        <th className="p-5 font-black text-orange-600 text-[10px] border-r w-[80px] min-w-[80px] max-w-[80px] text-center sticky left-[120px] bg-orange-50/30 z-40 leading-none">평균</th>
                         {tests.map(t => (
                           <th key={t.id} className="p-5 min-w-[180px] border-b text-left">
                             <div className="flex flex-col text-left">
@@ -680,9 +680,9 @@ export default function App() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 text-center">
                       {visibleStudentsFiltered.map(s => (
-                        <tr key={s.id}>
-                          <td className="p-5 font-bold sticky left-0 bg-white z-30 border-r text-center w-32">{s.name}</td>
-                          <td className="p-5 text-center sticky left-[128px] bg-white z-30 border-r font-black text-orange-600 w-24">{stats.studentTestAverages[s.id]}</td>
+                        <tr key={s.id} className="hover:bg-slate-50/50 group">
+                          <td className="p-5 font-bold sticky left-0 bg-white group-hover:bg-slate-50 z-30 border-r text-center w-[120px] min-w-[120px] max-w-[120px]">{s.name}</td>
+                          <td className="p-5 text-center sticky left-[120px] bg-white group-hover:bg-slate-50 z-30 border-r font-black text-orange-600 w-[80px] min-w-[80px] max-w-[80px]">{stats.studentTestAverages[s.id]}</td>
                           {tests.map(t => {
                             const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '' };
                             return (
@@ -710,22 +710,17 @@ export default function App() {
             </div>
           )}
 
-          {/* ... 나머지 탭(출결, 진도, 학생관리 등)은 기존 기능 유지 ... */}
           {activeTab === 'attendance' && (
-            /* 기존 출결 코드와 동일 */
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center font-bold">출결 탭은 기존과 동일하게 작동합니다.</div>
           )}
           {activeTab === 'progress' && (
-            /* 기존 진도 관리 코드와 동일 */
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center font-bold">진도 탭은 기존과 동일하게 작동합니다.</div>
           )}
           {activeTab === 'students' && userRole !== 'student' && (
-             /* 기존 학생 관리 코드와 동일 */
              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center font-bold">학생 관리 탭은 기존과 동일하게 작동합니다.</div>
           )}
         </main>
 
-        {/* --- Modals & Overlays (SelectedStudent, StatusMenu, etc.) --- */}
         {selectedStudent && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
             <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
@@ -753,7 +748,6 @@ export default function App() {
           </div>
         )}
         
-        {/* Status Menu Portal */}
         {statusMenu && (
           <div className="fixed inset-0 z-[150]" onClick={() => setStatusMenu(null)}>
             <div
