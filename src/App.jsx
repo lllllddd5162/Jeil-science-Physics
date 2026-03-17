@@ -935,12 +935,14 @@ export default function App() {
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center bg-white">
                   <h2 className="text-base font-bold flex items-center gap-2 shrink-0">{activeTab === 'matrix' ? <ClipboardCheck size={18}/> : <BrainCircuit size={18}/>} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
-                  <div className="ml-auto">
-                    <button onClick={() => setMatrixHideDone(v => !v)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixHideDone ? 'bg-blue-500 text-white border-blue-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
-                      <CheckCircle2 size={12}/>{matrixHideDone ? '완료 숨김 중' : '완료 숨기기'}
-                    </button>
-                  </div>
+                  {userRole !== 'student' && (
+                    <div className="ml-auto">
+                      <button onClick={() => setMatrixHideDone(v => !v)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixHideDone ? 'bg-blue-500 text-white border-blue-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                        <CheckCircle2 size={12}/>{matrixHideDone ? '완료 숨김 중' : '완료 숨기기'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* ── 모바일: 카드형 뷰 ── */}
