@@ -1291,9 +1291,9 @@ export default function App() {
                 {/* 달력 */}
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                    <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black">&#8249;</button>
+                    <button onClick={prevMonth} className="flex items-center gap-1 px-3 py-2 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black text-sm">&#8249; 이전</button>
                     <span className="font-black text-slate-800 text-base">{calYear}년 {calMonthIdx}월</span>
-                    <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black">&#8250;</button>
+                    <button onClick={nextMonth} className="flex items-center gap-1 px-3 py-2 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black text-sm">다음 &#8250;</button>
                   </div>
                   <div className="grid grid-cols-7 border-b border-slate-100">
                     {dayLabels.map((d, i) => (
@@ -1319,9 +1319,29 @@ export default function App() {
                           {dayPlans.length > 0 && (
                             <div className="space-y-0.5">
                               {dayPlans.slice(0, 2).map(p => (
-                                <div key={p.id} className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate ${p.done ? 'bg-teal-100 text-teal-700 line-through opacity-60' : 'bg-indigo-50 text-indigo-600'}`}>{p.subject} {p.unit}</div>
+                                <div key={p.id} className="relative group/tip">
+                                  <div className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate ${p.done ? 'bg-teal-100 text-teal-700 line-through opacity-60' : 'bg-indigo-50 text-indigo-600'}`}>{p.subject} {p.unit}</div>
+                                  <div className="absolute left-0 bottom-full mb-1 hidden group-hover/tip:block z-50 pointer-events-none">
+                                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl shadow-2xl whitespace-nowrap max-w-[200px] leading-snug">
+                                      {p.subject} {p.unit}
+                                    </div>
+                                    <div className="w-2 h-2 bg-slate-900 rotate-45 -mt-1 ml-2" />
+                                  </div>
+                                </div>
                               ))}
-                              {dayPlans.length > 2 && <div className="text-[9px] text-slate-400 font-bold px-1">+{dayPlans.length - 2}</div>}
+                              {dayPlans.length > 2 && (
+                                <div className="relative group/tip">
+                                  <div className="text-[9px] text-slate-400 font-bold px-1">+{dayPlans.length - 2}</div>
+                                  <div className="absolute left-0 bottom-full mb-1 hidden group-hover/tip:block z-50 pointer-events-none">
+                                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl shadow-2xl whitespace-nowrap leading-snug space-y-1">
+                                      {dayPlans.slice(2).map(p => (
+                                        <div key={p.id} className={p.done ? 'line-through opacity-60' : ''}>{p.subject} {p.unit}</div>
+                                      ))}
+                                    </div>
+                                    <div className="w-2 h-2 bg-slate-900 rotate-45 -mt-1 ml-2" />
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
