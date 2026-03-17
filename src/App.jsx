@@ -1652,7 +1652,7 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   <div className="space-y-1.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">시작 날짜</p>
-                    <input type="date" value={reportRange.from} onChange={e => setReportRange(r => ({...r, from: e.target.value}))}
+                    <input type="date" value={reportRange.from} onChange={e => setReportRange(r => ({...r, from: e.target.value, to: r.to < e.target.value ? e.target.value : r.to}))}
                       className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-slate-400 transition-all text-slate-800 shadow-sm" />
                   </div>
                   <div className="space-y-1.5">
@@ -1886,7 +1886,7 @@ export default function App() {
                                                 <th className="px-4 py-2.5 text-left font-black text-[10px] text-indigo-600 uppercase tracking-widest sticky left-0 bg-indigo-50">학생</th>
                                                 {dayDeadlineAssigns.map(a => (
                                                   <th key={a.id} className="px-3 py-2.5 text-center font-black text-[10px] text-indigo-600 min-w-[100px]">
-                                                    <p className="truncate max-w-[100px]">{a.title}</p>
+                                                    <p className="break-words whitespace-normal">{a.title}</p>
                                                     <p className="text-indigo-400 font-bold opacity-70">{a.subject}</p>
                                                   </th>
                                                 ))}
