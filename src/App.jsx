@@ -73,6 +73,14 @@ const STATUS_COLORS = {
   exempt: 'text-slate-400 bg-slate-100/50 border border-dashed border-slate-200'
 };
 
+const LESSON_TYPES = [
+  { id: '진도',        color: 'bg-indigo-500',  light: 'bg-indigo-50 text-indigo-700 border-indigo-200',  calChip: 'bg-indigo-100 text-indigo-700' },
+  { id: '암기',        color: 'bg-purple-500',  light: 'bg-purple-50 text-purple-700 border-purple-200',  calChip: 'bg-purple-100 text-purple-700' },
+  { id: '문제풀이',    color: 'bg-orange-500',  light: 'bg-orange-50 text-orange-700 border-orange-200',  calChip: 'bg-orange-100 text-orange-700' },
+  { id: '중간 테스트', color: 'bg-rose-500',    light: 'bg-rose-50 text-rose-700 border-rose-200',        calChip: 'bg-rose-100 text-rose-700' },
+  { id: '시험 직전 대비', color: 'bg-red-600',  light: 'bg-red-50 text-red-700 border-red-200',           calChip: 'bg-red-100 text-red-700' },
+];
+
 const DEFAULT_GRADE_SCALES = [
   { id: 'g1', label: '우수', min: 90, color: 'bg-indigo-500', icon: '🔥' },
   { id: 'g2', label: '보통', min: 70, color: 'bg-emerald-500', icon: '⭐' },
@@ -244,7 +252,7 @@ export default function App() {
   const [progressSelectedDate, setProgressSelectedDate] = useState(() => {
     return new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
   });
-  const [newPlan, setNewPlan] = useState({ subject: '물리', unit: '', memo: '' });
+  const [newPlan, setNewPlan] = useState({ subject: '물리', unit: '', memo: '', lessonType: '진도' });
   const [editPlanId, setEditPlanId] = useState(null);
   const [editPlanData, setEditPlanData] = useState(null);
 
@@ -441,16 +449,27 @@ export default function App() {
     if (rangedPlans.length === 0) {
       lines.push('  (해당 기간 진도 계획 없음)');
     } else {
-      const totalP = rangedPlans.length;
-      const doneP = rangedPlans.filter(p => p.done).length;
-      lines.push(`  전체 진도율: ${totalP > 0 ? Math.round(doneP/totalP*100) : 0}%  (${doneP}/${totalP} 완료)`);
+      const jinDoRanged = rangedPlans.filter(p => !p.lessonType || p.lessonType === '진도');
+      const totalP = jinDoRanged.length;
+      const doneP = jinDoRanged.filter(p => p.done).length;
+      lines.push(`  전체 진도율 (진도 수업 기준): ${totalP > 0 ? Math.round(doneP/totalP*100) : 0}%  (${doneP}/${totalP} 완료)`);
       SUBJECTS.forEach(sub => {
-        const subPlans = rangedPlans.filter(p => p.subject === sub);
+        const subPlans = jinDoRanged.filter(p => p.subject === sub);
         if (subPlans.length === 0) return;
         const subDone = subPlans.filter(p => p.done).length;
         lines.push(`  ${sub}: ${Math.round(subDone/subPlans.length*100)}%  (${subDone}/${subPlans.length})`);
         subPlans.forEach(p => lines.push(`    [${p.date}${p.done ? ' ✓' : ''}] ${p.unit}${p.memo ? `  — ${p.memo}` : ''}`));
       });
+      // 진도 외 수업 현황
+      const etcPlans = rangedPlans.filter(p => p.lessonType && p.lessonType !== '진도');
+      if (etcPlans.length > 0) {
+        lines.push(`\n  [기타 수업 현황]`);
+        ['암기','문제풀이','중간 테스트','시험 직전 대비'].forEach(lt => {
+          const lPlans = etcPlans.filter(p => p.lessonType === lt);
+          if (lPlans.length === 0) return;
+          lines.push(`  ${lt}: ${lPlans.filter(p=>p.done).length}/${lPlans.length} 완료`);
+        });
+      }
     }
 
     lines.push(`\n================================`);
@@ -1190,11 +1209,12 @@ export default function App() {
 
           {/* 진도 관리 탭 - student 전용 */}
           {activeTab === 'progress' && userRole === 'student' && (() => {
-            const totalPlans = progressPlans.length;
-            const donePlans = progressPlans.filter(p => p.done).length;
+            const jinDoPlans = progressPlans.filter(p => !p.lessonType || p.lessonType === '진도');
+            const totalPlans = jinDoPlans.length;
+            const donePlans = jinDoPlans.filter(p => p.done).length;
             const overallPct = totalPlans > 0 ? Math.round((donePlans / totalPlans) * 100) : 0;
             const subjectStats = SUBJECTS.reduce((acc, sub) => {
-              const all = progressPlans.filter(p => p.subject === sub);
+              const all = jinDoPlans.filter(p => p.subject === sub);
               const done = all.filter(p => p.done).length;
               if (all.length > 0) acc[sub] = { total: all.length, done };
               return acc;
@@ -1338,12 +1358,13 @@ export default function App() {
               return acc;
             }, {});
 
-            const totalPlans = progressPlans.length;
-            const donePlans = progressPlans.filter(p => p.done).length;
+            const jinDoPlans = progressPlans.filter(p => !p.lessonType || p.lessonType === '진도');
+            const totalPlans = jinDoPlans.length;
+            const donePlans = jinDoPlans.filter(p => p.done).length;
             const overallPct = totalPlans > 0 ? Math.round((donePlans / totalPlans) * 100) : 0;
 
             const subjectStats = SUBJECTS.reduce((acc, sub) => {
-              const all = progressPlans.filter(p => p.subject === sub);
+              const all = jinDoPlans.filter(p => p.subject === sub);
               const done = all.filter(p => p.done).length;
               if (all.length > 0) acc[sub] = { total: all.length, done };
               return acc;
@@ -1445,17 +1466,20 @@ export default function App() {
                           <div className={`text-xs font-black w-6 h-6 flex items-center justify-center rounded-full mb-1 ${isToday ? 'bg-teal-600 text-white' : isSelected ? 'text-teal-600' : colIdx === 0 ? 'text-red-400' : colIdx === 6 ? 'text-blue-400' : 'text-slate-600'}`}>{day}</div>
                           {dayPlans.length > 0 && (
                             <div className="space-y-0.5">
-                              {dayPlans.slice(0, 2).map(p => (
-                                <div key={p.id} className="relative group/tip">
-                                  <div className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate ${p.done ? 'bg-teal-100 text-teal-700 line-through opacity-60' : 'bg-indigo-50 text-indigo-600'}`}>{p.subject} {p.unit}</div>
-                                  <div className="absolute left-0 bottom-full mb-1 hidden group-hover/tip:block z-50 pointer-events-none">
-                                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl shadow-2xl whitespace-nowrap max-w-[200px] leading-snug">
-                                      {p.subject} {p.unit}
+                              {dayPlans.slice(0, 2).map(p => {
+                                const lt = LESSON_TYPES.find(l => l.id === p.lessonType) || LESSON_TYPES[0];
+                                return (
+                                  <div key={p.id} className="relative group/tip">
+                                    <div className={`text-[9px] font-black px-1 py-0.5 rounded leading-none truncate ${p.done ? 'opacity-50 line-through ' + lt.calChip : lt.calChip}`}>{p.subject} {p.unit}</div>
+                                    <div className="absolute left-0 bottom-full mb-1 hidden group-hover/tip:block z-50 pointer-events-none">
+                                      <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1.5 rounded-xl shadow-2xl whitespace-nowrap max-w-[200px] leading-snug">
+                                        [{p.lessonType || '진도'}] {p.subject} {p.unit}
+                                      </div>
+                                      <div className="w-2 h-2 bg-slate-900 rotate-45 -mt-1 ml-2" />
                                     </div>
-                                    <div className="w-2 h-2 bg-slate-900 rotate-45 -mt-1 ml-2" />
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                               {dayPlans.length > 2 && (
                                 <div className="relative group/tip">
                                   <div className="text-[9px] text-slate-400 font-bold px-1">+{dayPlans.length - 2}</div>
@@ -1515,6 +1539,16 @@ export default function App() {
                   {userRole === 'master' && (
                     <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">새 계획 추가</p>
+                      {/* 수업 종류 선택 */}
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">수업 종류</p>
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {LESSON_TYPES.map(lt => (
+                          <button key={lt.id} onClick={() => setNewPlan({ ...newPlan, lessonType: lt.id })}
+                            className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border-2 transition-all ${newPlan.lessonType === lt.id ? lt.light + ' border-current shadow-sm' : 'border-slate-200 text-slate-400 bg-white hover:border-slate-300'}`}>{lt.id}</button>
+                        ))}
+                      </div>
+                      {/* 과목 선택 */}
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">과목</p>
                       <div className="flex flex-wrap gap-1.5 mb-3">
                         {SUBJECTS.map(sub => (
                           <button key={sub} onClick={() => setNewPlan({ ...newPlan, subject: sub })}
@@ -1540,6 +1574,13 @@ export default function App() {
                         <div key={plan.id} className="px-6 py-4 group hover:bg-slate-50 transition-all">
                           {editPlanId === plan.id ? (
                             <div className="space-y-3 animate-in slide-in-from-top-2">
+                              {/* 수업 종류 */}
+                              <div className="flex flex-wrap gap-1.5">
+                                {LESSON_TYPES.map(lt => (
+                                  <button key={lt.id} onClick={() => setEditPlanData({ ...editPlanData, lessonType: lt.id })}
+                                    className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border-2 transition-all ${(editPlanData.lessonType || '진도') === lt.id ? lt.light + ' border-current shadow-sm' : 'border-slate-200 text-slate-400 bg-white hover:border-slate-300'}`}>{lt.id}</button>
+                                ))}
+                              </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {SUBJECTS.map(sub => (
                                   <button key={sub} onClick={() => setEditPlanData({ ...editPlanData, subject: sub })}
@@ -1565,6 +1606,8 @@ export default function App() {
                                 className={`shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${plan.done ? 'bg-teal-500 border-teal-500' : 'border-slate-300 hover:border-teal-400 bg-white'} ${userRole !== 'master' ? 'cursor-default' : 'cursor-pointer'}`}>
                                 {plan.done && <CheckCircle2 size={14} className="text-white" />}
                               </button>
+                              {/* 수업 종류 뱃지 */}
+                              {(() => { const lt = LESSON_TYPES.find(l => l.id === (plan.lessonType || '진도')) || LESSON_TYPES[0]; return <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border shrink-0 leading-none ${plan.done ? 'bg-slate-50 text-slate-400 border-slate-100' : lt.light}`}>{plan.lessonType || '진도'}</span>; })()}
                               <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black border shrink-0 leading-none ${plan.done ? 'bg-slate-50 text-slate-400 border-slate-100' : 'bg-teal-50 text-teal-700 border-teal-100'}`}>{plan.subject}</span>
                               <div className="flex-1 min-w-0">
                                 <span className={`font-black text-sm leading-none ${plan.done ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{plan.unit}</span>
@@ -1572,7 +1615,7 @@ export default function App() {
                               </div>
                               {userRole === 'master' && (
                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                                  <button onClick={() => { setEditPlanId(plan.id); setEditPlanData({ ...plan }); }} className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"><Edit2 size={13} /></button>
+                                  <button onClick={() => { setEditPlanId(plan.id); setEditPlanData({ ...plan, lessonType: plan.lessonType || '진도' }); }} className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"><Edit2 size={13} /></button>
                                   <button onClick={() => deletePlan(plan.id)} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all"><Trash2 size={13} /></button>
                                 </div>
                               )}
