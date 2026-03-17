@@ -811,7 +811,7 @@ export default function App() {
               </div>
             </div>
             <nav className="flex bg-white/10 p-1 rounded-xl items-center overflow-x-auto max-w-full no-scrollbar">
-              {[{ id: 'matrix', l: '과제 현황', i: BarChart3 }, { id: 'memorization', l: '암기 현황', i: BrainCircuit }, { id: 'tests', l: '성적표', i: Trophy }, { id: 'attendance', l: '출결 관리', i: Calendar }, { id: 'progress', l: '진도 관리', i: TrendingUp }, { id: 'students', l: '학생 관리', i: Users, h: userRole === 'student' }, { id: 'report', l: '리포트', i: Printer, h: userRole !== 'master' }, { id: 'assignments', l: '항목 등록', i: BookOpen, h: userRole === 'student' }].filter(t => !t.h).map(tab => (
+              {[{ id: 'matrix', l: '과제 현황', i: BarChart3 }, { id: 'memorization', l: '암기 현황', i: BrainCircuit }, { id: 'tests', l: '성적표', i: Trophy }, { id: 'attendance', l: '출결 관리', i: Calendar }, { id: 'progress', l: '진도 관리', i: TrendingUp }, { id: 'students', l: '학생 관리', i: Users, h: userRole === 'student' }, { id: 'report', l: '리포트', i: Printer, h: userRole === 'student' }, { id: 'assignments', l: '항목 등록', i: BookOpen, h: userRole === 'student' }].filter(t => !t.h).map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-bold whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-md font-black' : 'hover:bg-white/10 text-white'}`}><tab.i size={16} />{tab.l}</button>
               ))}
               <button onClick={handleLogout} className="ml-2 p-2 hover:bg-white/20 rounded-lg text-white transition"><LogOut size={18} /></button>
@@ -994,11 +994,39 @@ export default function App() {
                               </div>
                             )}
                           </td>
-                          <td className="p-5 border-r text-center">
-                            <div className="flex flex-col text-center">
-                              <span className={`${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'} text-[11px] font-black`}>{(activeTab === 'matrix' ? (stats.assign[s.id]?.label || '-') : (stats.memo[s.id]?.label || '-'))}</span>
-                              <span className={`${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'} text-[10px] font-black`}>{(activeTab === 'matrix' ? (stats.assign[s.id]?.percent || '0.0') : (stats.memo[s.id]?.percent || '0.0'))}%</span>
-                            </div>
+                          <td className="p-4 border-r text-center">
+                            {(() => {
+                              const isMatrix = activeTab === 'matrix';
+                              const items = isMatrix ? assignments : memoItems;
+                              const subData = isMatrix ? submissions : memoSubmissions;
+                              const rel = items.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
+                              const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
+                              const effective = rel.length - exempt;
+                              const doneStatus = isMatrix ? ['completed'] : ['round_4'];
+                              const done = rel.filter(a => doneStatus.includes(subData[`${s.id}-${a.id}`]?.status)).length;
+                              const incomplete = isMatrix ? rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'incomplete_red').length : 0;
+                              const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
+                              const statInfo = isMatrix ? stats.assign[s.id] : stats.memo[s.id];
+
+                              if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
+
+                              return (
+                                <div className="flex flex-col items-center gap-1.5">
+                                  {/* 퍼센트 */}
+                                  <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
+                                  {/* 진행바 */}
+                                  <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
+                                  </div>
+                                  {/* 완료/전체 */}
+                                  <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
+                                  {/* 미완료 강조 */}
+                                  {incomplete > 0 && (
+                                    <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg border border-red-100 leading-none">미완료 {incomplete}</span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           {(activeTab === 'matrix' ? assignments : memoItems).map(as => {
                             const subKey = `${s.id}-${as.id}`;
@@ -1657,7 +1685,7 @@ export default function App() {
           
                     {/* 항목 등록 탭 */}
           {/* 리포트 탭 */}
-          {activeTab === 'report' && userRole === 'master' && (
+          {activeTab === 'report' && (userRole === 'master' || userRole === 'teacher') && (
             <div className="max-w-4xl mx-auto space-y-6 text-left">
 
               {/* 날짜 범위 + 생성 */}
@@ -2557,7 +2585,7 @@ export default function App() {
               })()}
 
               {/* AI 분석 */}
-              {reportGenerated && (
+              {reportGenerated && userRole === 'master' && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                     <p className="font-black text-slate-800 flex items-center gap-2 leading-none"><Bot size={16} className="text-violet-500" /> AI 학습 분석</p>
