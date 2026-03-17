@@ -352,7 +352,6 @@ export default function App() {
   const [editPlanData, setEditPlanData] = useState(null);
 
   const [matrixHideDone, setMatrixHideDone] = useState(false);
-  const [matrixCollapsedSubjects, setMatrixCollapsedSubjects] = useState({});
 
   // UI Support
   const [currentDate, setCurrentDate] = useState(() => {
@@ -1092,15 +1091,12 @@ export default function App() {
                             <th className="p-5 font-black text-[10px] uppercase border-r w-28 text-center">진척도</th>
                             {subjectGroups.map(({ subject, items }) => (
                               <React.Fragment key={subject}>
-                                {/* 과목 그룹 헤더 */}
                                 <th colSpan={items.length}
-                                  className="border-b border-l-2 border-l-indigo-200 text-center cursor-pointer select-none hover:bg-indigo-50/50 transition-colors"
-                                  style={{background:'var(--sc-faint)'}}
-                                  onClick={() => setMatrixCollapsedSubjects(prev => ({...prev, [subject]: !prev[subject]}))}>
+                                  className="border-b border-l-2 border-l-indigo-200 text-center"
+                                  style={{background:'var(--sc-faint)'}}>
                                   <div className="flex items-center justify-center gap-2 py-2 px-3">
                                     <span className="text-[11px] font-black" style={{color:'var(--sc)'}}>{subject}</span>
                                     <span className="text-[9px] font-bold text-slate-400">{items.length}개</span>
-                                    <ChevronDown size={12} style={{color:'var(--sc)'}} className={`transition-transform ${matrixCollapsedSubjects[subject] ? '-rotate-90' : ''}`}/>
                                   </div>
                                 </th>
                               </React.Fragment>
@@ -1111,7 +1107,6 @@ export default function App() {
                             <th className="sticky left-0 bg-slate-50 z-30 border-r"/>
                             <th className="border-r"/>
                             {subjectGroups.map(({ subject, items }) =>
-                              matrixCollapsedSubjects[subject] ? null :
                               items.map((as) => (
                                 <th key={as.id} className="p-4 min-w-[150px] border-b border-l border-slate-100 relative group text-center">
                                   <div className="flex flex-col relative text-center">
@@ -1212,11 +1207,7 @@ export default function App() {
                                 })()}
                               </td>
                               {subjectGroups.map(({ subject, items }) =>
-                                matrixCollapsedSubjects[subject]
-                                  ? <td key={subject+'-collapsed'} className="border-l-2 border-l-indigo-100 bg-indigo-50/20 px-3 text-center">
-                                      <span className="text-[9px] text-indigo-300 font-black">접힘</span>
-                                    </td>
-                                  : items.map(as => {
+                                items.map(as => {
                                       const subKey = `${s.id}-${as.id}`;
                                       const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
                                       const status = sub?.status || 'not_started';
@@ -3116,6 +3107,48 @@ export default function App() {
                     <p className="text-2xl font-black text-orange-700">{stats.studentTestAverages[selectedStudent.id] || '0.0'}점</p>
                   </div>
                 </div>
+                {/* 시험별 점수 상세 */}
+                {tests.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><Trophy size={12} className="text-orange-400"/> 시험별 점수</p>
+                    <div className="space-y-2">
+                      {tests.map(t => {
+                        const sc = testScores[`${selectedStudent.id}-${t.id}`];
+                        const score = sc?.score;
+                        const grade = score != null && t.scales
+                          ? [...t.scales].sort((a,b) => b.min - a.min).find(g => score >= g.min)
+                          : null;
+                        const avg = parseFloat(stats.testAverages[t.id] || 0);
+                        const diff = score != null ? (score - avg).toFixed(1) : null;
+                        return (
+                          <div key={t.id} className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-slate-700 truncate">{t.title}</p>
+                              <p className="text-[9px] font-bold text-slate-400 mt-0.5">{t.date}{t.difficulty && ` · ${t.difficulty}`}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {score != null ? (
+                                <>
+                                  {grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600">{grade.icon} {grade.label}</span>}
+                                  <div className="text-right">
+                                    <p className={`text-base font-black leading-none ${score>=80?'text-blue-600':score>=60?'text-amber-500':'text-red-500'}`}>{score}점</p>
+                                    {diff !== null && (
+                                      <p className={`text-[9px] font-bold mt-0.5 leading-none ${parseFloat(diff)>0?'text-emerald-500':parseFloat(diff)<0?'text-red-400':'text-slate-400'}`}>
+                                        평균 대비 {parseFloat(diff)>0?'+':''}{diff}
+                                      </p>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-300">미응시</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {userRole === 'master' && (
                   <div className="space-y-1.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><StickyNote size={12} /> 학생 메모</p>
