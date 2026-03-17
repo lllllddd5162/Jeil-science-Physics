@@ -1153,13 +1153,12 @@ export default function App() {
                                   ) : (
                                     <>{cfg?.icon && React.createElement(cfg.icon, { size: 18 })}{status !== 'not_started' && <span className="text-[8px] font-black mt-0.5">{cfg?.label}</span>}</>
                                   )}
+                                  {isOverdue && (
+                                    <span className="mt-1 text-[8px] font-black text-red-600 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded-lg leading-none flex items-center gap-0.5">
+                                      <AlertTriangle size={8}/>{overDiff}일 초과
+                                    </span>
+                                  )}
                                 </div>
-                                {isOverdue && (
-                                  <div className="mt-1 flex items-center justify-center gap-0.5 px-1.5 py-0.5 bg-red-100 rounded-lg border border-red-200 w-fit mx-auto">
-                                    <AlertTriangle size={8} className="text-red-500 shrink-0" />
-                                    <span className="text-[8px] font-black text-red-600 leading-none">{overDiff}일 초과</span>
-                                  </div>
-                                )}
                                 {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
                                   <div className="mt-1 leading-none">
                                     {inlineDateEditKey === subKey ? (
