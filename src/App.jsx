@@ -1303,20 +1303,33 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 text-slate-700 text-center">
                       {visibleStudentsFiltered.map(s => (
                         <tr key={s.id} className="text-center">
-                          <td className="p-5 font-bold sticky left-0 bg-white z-10 border-r text-center">{s.name}</td>
+                          <td className="p-4 font-bold sticky left-0 bg-white z-10 border-r text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <span className="font-black text-slate-800">{s.name}</span>
+                              <button onClick={() => setSelectedStudent(s)} className="p-1 hover:bg-orange-50 rounded-lg transition-colors">
+                                <Search size={13} className="text-slate-300 hover:text-orange-400 transition-colors"/>
+                              </button>
+                            </div>
+                          </td>
                           <td className="p-5 text-center border-r font-black text-orange-600 bg-orange-50/10 leading-none">{stats.studentTestAverages[s.id]}</td>
                           {tests.map(t => {
                             const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '' };
+                            const score = res.score;
+                            const grade = (score !== '' && score != null) && t.scales
+                              ? [...t.scales].sort((a,b) => b.min - a.min).find(g => parseFloat(score) >= g.min)
+                              : null;
                             return (
                               <td key={t.id} className="p-4 text-center">
                                 {userRole === 'master' ? (
                                   <div className="flex flex-col gap-2">
                                     <BufferedInput type="number" value={res.score ?? ''} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { score: v === '' ? null : parseFloat(v) }, { merge: true })} className="w-full px-3 py-1.5 rounded-xl bg-slate-50 font-bold text-center text-sm focus:border-orange-500 shadow-sm transition-all" />
+                                    {grade && <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg">{grade.icon} {grade.label}</span>}
                                     <BufferedTextarea value={res.plan} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { plan: v }, { merge: true })} className="w-full px-3 py-2 rounded-xl bg-slate-50 border-none text-[10px] h-12 resize-none font-medium shadow-inner text-center" />
                                   </div>
                                 ) : (
                                   <div className="space-y-1 text-center">
-                                    <div className="w-full py-1.5 bg-slate-50 rounded-xl font-black text-slate-700 text-sm text-center shadow-sm">{res.score ?? '-'}점</div>
+                                    <div className="w-full py-1.5 bg-slate-50 rounded-xl font-black text-slate-700 text-sm text-center shadow-sm">{score !== '' && score != null ? `${score}점` : '-'}</div>
+                                    {grade && <div className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg">{grade.icon} {grade.label}</div>}
                                     {res.plan && <div className="text-[10px] bg-indigo-50/50 p-2 rounded-xl text-indigo-700 font-medium whitespace-pre-wrap text-center leading-tight shadow-inner">{res.plan}</div>}
                                   </div>
                                 )}
@@ -3094,8 +3107,20 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-indigo-50 rounded-2xl p-4 text-center">
                     <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">과제 진척도</p>
-                    <p className="text-2xl font-black text-indigo-700">{stats.assign[selectedStudent.id]?.percent || '0.0'}%</p>
-                    <p className="text-xs text-indigo-500 font-bold">{stats.assign[selectedStudent.id]?.label || '-'}</p>
+                    {(() => {
+                      const sid = selectedStudent.id;
+                      const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(sid));
+                      const done = rel.filter(a => submissions[`${sid}-${a.id}`]?.status === 'completed').length;
+                      const incomplete = rel.filter(a => submissions[`${sid}-${a.id}`]?.status === 'incomplete_red').length;
+                      const effective = done + incomplete;
+                      const pct = effective > 0 ? Math.round(done / effective * 100) : null;
+                      return pct !== null ? (
+                        <>
+                          <p className="text-2xl font-black text-indigo-700">{pct}%</p>
+                          <p className="text-xs text-indigo-500 font-bold">{done}/{effective} 완료</p>
+                        </>
+                      ) : <p className="text-sm font-black text-indigo-300 mt-2">집계 중</p>;
+                    })()}
                   </div>
                   <div className="bg-purple-50 rounded-2xl p-4 text-center">
                     <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">암기 진척도</p>
