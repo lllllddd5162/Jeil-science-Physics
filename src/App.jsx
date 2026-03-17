@@ -209,7 +209,95 @@ const BufferedTextarea = ({ value, onSave, placeholder, className, disabled = fa
   );
 };
 
-// --- Main App Component ---
+// --- Progress Mini Calendar Component ---
+function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday }) {
+  const [calYear, calMonthIdx] = progressCalMonth.split('-').map(Number);
+  const firstDay = new Date(calYear, calMonthIdx - 1, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonthIdx, 0).getDate();
+  const plansByDate = progressPlans.reduce((acc, p) => {
+    if (!acc[p.date]) acc[p.date] = [];
+    acc[p.date].push(p);
+    return acc;
+  }, {});
+  const prevMonth = () => {
+    let y = calYear, m = calMonthIdx - 1;
+    if (m < 1) { m = 12; y -= 1; }
+    setProgressCalMonth(`${y}-${String(m).padStart(2, '0')}`);
+  };
+  const nextMonth = () => {
+    let y = calYear, m = calMonthIdx + 1;
+    if (m > 12) { m = 1; y += 1; }
+    setProgressCalMonth(`${y}-${String(m).padStart(2, '0')}`);
+  };
+  const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+
+  const renderCell = (dateStr, day, colIdx, extra = {}) => {
+    const dayPlans = plansByDate[dateStr] || [];
+    const isToday = kstToday === dateStr;
+    const { dim = false } = extra;
+    return (
+      <div key={dateStr} className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all ${dim ? 'bg-slate-50/30' : 'hover:bg-teal-50/30'}`}>
+        <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1 ${isToday ? 'bg-teal-600 text-white' : dim ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300') : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>{day}</div>
+        {dayPlans.length > 0 && (
+          <div className="space-y-0.5">
+            {dayPlans.slice(0, 2).map(p => {
+              const lt = LESSON_TYPES.find(l => l.id === (p.lessonType || '진도')) || LESSON_TYPES[0];
+              return <div key={p.id} className={`text-[8px] font-black px-1 py-0.5 rounded leading-none truncate ${dim ? 'opacity-30' : (p.done ? 'opacity-50 line-through ' : '') + lt.calChip}`}>{p.subject} {p.unit}</div>;
+            })}
+            {dayPlans.length > 2 && <div className="text-[8px] text-slate-400 font-bold px-1">+{dayPlans.length - 2}</div>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+        <button onClick={prevMonth} className="px-2 py-1.5 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black text-sm">&#8249; 이전</button>
+        <span className="font-black text-slate-800 text-sm">{calYear}년 {calMonthIdx}월</span>
+        <button onClick={nextMonth} className="px-2 py-1.5 hover:bg-slate-100 rounded-xl transition-all text-slate-500 font-black text-sm">다음 &#8250;</button>
+      </div>
+      <div className="grid grid-cols-7 border-b border-slate-100">
+        {dayLabels.map((d, i) => (
+          <div key={d} className={`py-1.5 text-center text-[10px] font-black ${i===0?'text-red-400':i===6?'text-blue-400':'text-slate-400'}`}>{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {Array.from({ length: firstDay }).map((_, i) => {
+          const prevMonthDays = new Date(calYear, calMonthIdx - 1, 0).getDate();
+          const day = prevMonthDays - firstDay + i + 1;
+          let pY = calYear, pM = calMonthIdx - 1;
+          if (pM < 1) { pM = 12; pY -= 1; }
+          const dateStr = `${pY}-${String(pM).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          return renderCell(dateStr, day, i % 7, { dim: true });
+        })}
+        {Array.from({ length: daysInMonth }).map((_, i) => {
+          const day = i + 1;
+          const dateStr = `${calYear}-${String(calMonthIdx).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const colIdx = (firstDay + i) % 7;
+          return renderCell(dateStr, day, colIdx);
+        })}
+        {Array.from({ length: (7 - (firstDay + daysInMonth) % 7) % 7 }).map((_, i) => {
+          const day = i + 1;
+          let nY = calYear, nM = calMonthIdx + 1;
+          if (nM > 12) { nM = 1; nY += 1; }
+          const dateStr = `${nY}-${String(nM).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const colIdx = (firstDay + daysInMonth + i) % 7;
+          return renderCell(dateStr, day, colIdx, { dim: true });
+        })}
+      </div>
+      {/* 범례 */}
+      <div className="px-4 py-2.5 border-t border-slate-50 flex flex-wrap gap-2">
+        {LESSON_TYPES.map(lt => (
+          <span key={lt.id} className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${lt.light}`}>{lt.id}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1162,6 +1250,16 @@ export default function App() {
                   {userRole === 'master' && <button onClick={handleBulkAttendanceToggle} className="flex items-center gap-2 bg-emerald-500 text-white px-5 py-3 rounded-2xl font-black shadow-lg hover:bg-emerald-600 transition active:scale-95 whitespace-nowrap shadow-md leading-none"><CheckCircle size={18} /> 일괄 출석</button>}
                 </div>
               </div>
+              {/* 진도 달력 미니 뷰 */}
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
+                <ProgressMiniCalendar
+                  progressPlans={progressPlans}
+                  progressCalMonth={progressCalMonth}
+                  setProgressCalMonth={setProgressCalMonth}
+                  kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                />
+              </div>
               <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-left shadow-sm">
                 {students.map(s => {
                   const att = attendance[`${s.id}-${currentDate}`] || { status: 'none', makeup: false };
@@ -1711,6 +1809,17 @@ export default function App() {
                   style={{background:'var(--sc)'}}>
                   <Printer size={18} /> 리포트 생성
                 </button>
+              </div>
+
+              {/* 진도 달력 */}
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
+                <ProgressMiniCalendar
+                  progressPlans={progressPlans}
+                  progressCalMonth={progressCalMonth}
+                  setProgressCalMonth={setProgressCalMonth}
+                  kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                />
               </div>
 
               {/* 생성된 리포트 */}
