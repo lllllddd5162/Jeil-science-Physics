@@ -123,6 +123,17 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// --- useWindowSize Hook ---
+function useWindowSize() {
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  useEffect(() => {
+    const handler = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return width;
+}
+
 // --- Helper Functions ---
 const calculateRoundProgress = (students, items, submissionData, statusOrder, labels) => {
   return students.reduce((acc, s) => {
@@ -189,6 +200,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('matrix');
+
+  const windowWidth = useWindowSize();
+  const isMobile = windowWidth < 768;
 
   // RBAC State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -805,6 +819,96 @@ export default function App() {
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
                   <h2 className="text-xl font-bold flex items-center gap-2">{activeTab === 'matrix' ? <ClipboardCheck /> : <BrainCircuit />} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
                 </div>
+
+                {/* ── 모바일: 카드형 뷰 ── */}
+                {isMobile ? (
+                  <div className="divide-y divide-slate-100">
+                    {visibleStudentsFiltered.map(s => {
+                      const items = activeTab === 'matrix' ? assignments : memoItems;
+                      const progressStat = activeTab === 'matrix' ? stats.assign[s.id] : stats.memo[s.id];
+                      return (
+                        <div key={s.id} className="p-4">
+                          {/* 학생 헤더 */}
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <p className="text-base font-black text-slate-800">{s.name}</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {s.homeroomTeacher && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold border border-indigo-100 leading-none"><UserCircle2 size={9}/> {s.homeroomTeacher}</span>}
+                                {s.highSchool && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded text-[9px] font-bold border border-slate-100 leading-none"><School size={9}/> {s.highSchool}</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className={`text-right px-3 py-1.5 rounded-xl ${activeTab === 'matrix' ? 'bg-indigo-50' : 'bg-purple-50'}`}>
+                                <p className={`text-xs font-black ${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'}`}>{progressStat?.label || '-'}</p>
+                                <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{progressStat?.percent || '0.0'}%</p>
+                              </div>
+                              <button onClick={() => setSelectedStudent(s)}><Search size={16} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
+                            </div>
+                          </div>
+                          {/* 과제 목록 */}
+                          <div className="space-y-2">
+                            {items.map(as => {
+                              const isTarget = as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id));
+                              const subKey = `${s.id}-${as.id}`;
+                              const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
+                              const status = sub?.status || 'not_started';
+                              const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
+                              const isLate = status === 'completed' && as.deadline && sub?.completionDate > as.deadline;
+                              const today = new Date().toISOString().split('T')[0];
+                              const diff = as.deadline ? Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
+
+                              if (!isTarget) return (
+                                <div key={as.id} className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-50/50 border border-slate-100 opacity-40">
+                                  <span className="text-[11px] font-black text-slate-400 truncate flex-1 mr-2">{as.title}</span>
+                                  <span className="text-[9px] text-slate-300 font-bold whitespace-nowrap">대상 아님</span>
+                                </div>
+                              );
+
+                              const colorClass = activeTab === 'matrix' ? (isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]) : `${cfg?.bg} ${cfg?.color}`;
+                              const Icon = activeTab === 'matrix'
+                                ? (status === 'completed' ? (isLate ? History : CheckCircle2) : status === 'in_progress' ? Clock : status === 'incomplete_red' ? AlertCircle : status === 'exempt' ? MinusCircle : Circle)
+                                : cfg?.icon || Circle;
+
+                              return (
+                                <div
+                                  key={as.id}
+                                  onClick={(e) => { if (userRole === 'master') setStatusMenu({ studentId: s.id, itemId: as.id, category: activeTab === 'matrix' ? 'assignment' : 'memorization', x: e.clientX, y: e.clientY }); }}
+                                  className={`flex items-center justify-between px-3 py-2.5 rounded-2xl border transition-all ${colorClass} ${userRole === 'master' ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
+                                >
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <Icon size={16} className="shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-[11px] font-black truncate leading-tight">{as.title}</p>
+                                      <p className="text-[9px] font-bold opacity-70 leading-none mt-0.5">{as.subject} · {as.level}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                                    {activeTab === 'matrix' && as.deadline && diff !== null && (
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap ${diff < 0 ? 'bg-red-100 text-red-600 border-red-200' : diff === 0 ? 'bg-orange-100 text-orange-600 border-orange-200' : diff <= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/60 text-current border-current/20'}`}>
+                                        {diff < 0 ? `D+${Math.abs(diff)}` : diff === 0 ? 'D-Day' : `D-${diff}`}
+                                      </span>
+                                    )}
+                                    {activeTab === 'memorization' && status !== 'not_started' && (
+                                      <span className="text-[9px] font-black opacity-80 whitespace-nowrap">{cfg?.label}</span>
+                                    )}
+                                    {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
+                                      inlineDateEditKey === subKey ? (
+                                        <input type="date" value={sub?.completionDate || ''} onChange={(e) => updateCompletionDate(s.id, as.id, e.target.value, activeTab === 'matrix' ? 'assignment' : 'memorization')} onBlur={() => setInlineDateEditKey(null)} className="text-[9px] border-none bg-white/60 rounded px-1 outline-none font-bold w-24" autoFocus onClick={e => e.stopPropagation()} />
+                                      ) : (
+                                        <span onClick={(e) => { e.stopPropagation(); setInlineDateEditKey(subKey); }} className="text-[9px] font-bold opacity-60 hover:opacity-100 cursor-pointer whitespace-nowrap">{sub?.completionDate?.split('-').slice(1).join('/') || '날짜'}</span>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                /* ── 데스크탑: 기존 테이블 뷰 ── */
                 <div className="overflow-x-auto text-slate-700">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50/50 text-slate-400">
@@ -900,6 +1004,7 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             </div>
           )}
