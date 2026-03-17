@@ -953,7 +953,7 @@ export default function App() {
                                   </div>
                                 )}
                               </div>
-                              <span className="text-xs font-bold text-slate-700 truncate block text-center leading-tight">{as.title}</span>
+                              <span className="text-xs font-bold text-slate-700 block text-center leading-tight break-words whitespace-normal">{as.title}</span>
                               {activeTab === 'matrix' && as.deadline && (() => {
                                 const today = new Date().toISOString().split('T')[0];
                                 const diff = Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24));
@@ -1068,7 +1068,7 @@ export default function App() {
                                   {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
                                 </div>
                               </div>
-                              <span className="text-xs font-bold text-slate-700 truncate block w-40 text-left leading-tight">{t.title}</span>
+                              <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
                               {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
                               <span className="mt-1 text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded w-fit leading-none">AVG: {stats.testAverages[t.id]}점</span>
                             </div>
