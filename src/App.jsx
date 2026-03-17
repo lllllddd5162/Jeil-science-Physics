@@ -351,6 +351,10 @@ export default function App() {
   const [editPlanId, setEditPlanId] = useState(null);
   const [editPlanData, setEditPlanData] = useState(null);
 
+  const [matrixFilterSubject, setMatrixFilterSubject] = useState('전체');
+  const [matrixHideDone, setMatrixHideDone] = useState(false);
+  const [matrixCollapsedSubjects, setMatrixCollapsedSubjects] = useState({});
+
   // UI Support
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
@@ -930,8 +934,25 @@ export default function App() {
               </div>
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                  <h2 className="text-xl font-bold flex items-center gap-2">{activeTab === 'matrix' ? <ClipboardCheck /> : <BrainCircuit />} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
+                <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center bg-white">
+                  <h2 className="text-base font-bold flex items-center gap-2 shrink-0">{activeTab === 'matrix' ? <ClipboardCheck size={18}/> : <BrainCircuit size={18}/>} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
+                  <div className="flex flex-wrap gap-2 ml-auto items-center">
+                    {/* 과목 필터 */}
+                    <div className="flex gap-1 flex-wrap">
+                      {['전체', ...SUBJECTS].map(s => (
+                        <button key={s} onClick={() => setMatrixFilterSubject(s)}
+                          className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition-all ${matrixFilterSubject === s ? 'text-white border-transparent shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}
+                          style={matrixFilterSubject === s ? {background:'var(--sc)'} : {}}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    {/* 완료 숨기기 토글 */}
+                    <button onClick={() => setMatrixHideDone(v => !v)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixHideDone ? 'bg-blue-500 text-white border-blue-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                      <CheckCircle2 size={12}/>{matrixHideDone ? '완료 숨김 중' : '완료 숨기기'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* ── 모바일: 카드형 뷰 ── */}
@@ -1031,150 +1052,198 @@ export default function App() {
                 ) : (
                 /* ── 데스크탑: 기존 테이블 뷰 ── */
                 <div className="overflow-x-auto text-slate-700">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50/50 text-slate-400">
-                      <tr>
-                        <th className="p-5 font-black text-[10px] uppercase sticky left-0 bg-slate-50 z-30 w-64 border-r text-center">학생 정보</th>
-                        <th className="p-5 font-black text-[10px] uppercase border-r w-28 text-center">진척도</th>
-                        {(activeTab === 'matrix' ? assignments : memoItems).map((as) => (
-                          <th key={as.id} className="p-5 min-w-[150px] border-b relative group text-center">
-                            <div className="flex flex-col relative text-center">
-                              <div className="flex justify-between items-start mb-1 text-left leading-none">
-                                <span className="text-[9px] font-black text-indigo-600 uppercase tracking-tighter leading-none">{as.subject} | {as.level}</span>
-                                {userRole === 'master' && (
-                                  <div className="flex gap-1 leading-none">
-                                    <button onClick={(e) => { e.stopPropagation(); setBulkSelectedDate(new Date().toISOString().split('T')[0]); setBulkSelectedStatus(null); setBulkDatePopup({ item: as, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }} className="px-1.5 py-0.5 bg-white border rounded text-[9px] font-black text-slate-600 hover:bg-slate-50 leading-none">일괄</button>
+                  {(() => {
+                    const allItems = activeTab === 'matrix' ? assignments : memoItems;
+                    // 필터 적용
+                    const filteredItems = allItems.filter(as => {
+                      if (matrixFilterSubject !== '전체' && as.subject !== matrixFilterSubject) return false;
+                      if (matrixHideDone) {
+                        // 모든 대상 학생이 완료했으면 숨김
+                        const targets = visibleStudentsFiltered.filter(s => as.type === 'all' || as.targetStudents?.includes(s.id));
+                        const allDone = targets.length > 0 && targets.every(s => {
+                          const st = (activeTab === 'matrix' ? submissions : memoSubmissions)[`${s.id}-${as.id}`]?.status;
+                          return st === 'completed' || st === 'exempt' || st === 'round_4';
+                        });
+                        if (allDone) return false;
+                      }
+                      return true;
+                    });
+
+                    // 과목별 그룹핑
+                    const subjectGroups = SUBJECTS.map(sub => ({
+                      subject: sub,
+                      items: filteredItems.filter(a => a.subject === sub)
+                    })).filter(g => g.items.length > 0);
+
+                    if (filteredItems.length === 0) return (
+                      <div className="p-12 text-center text-slate-400 font-bold">
+                        <CheckCircle2 size={32} className="text-blue-200 mx-auto mb-3"/>
+                        <p>표시할 과제가 없어요.</p>
+                        <p className="text-sm mt-1 text-slate-300">필터를 변경하거나 완료 숨기기를 해제해보세요.</p>
+                      </div>
+                    );
+
+                    return (
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50/50 text-slate-400">
+                          <tr>
+                            <th className="p-5 font-black text-[10px] uppercase sticky left-0 bg-slate-50 z-30 w-64 border-r text-center">학생 정보</th>
+                            <th className="p-5 font-black text-[10px] uppercase border-r w-28 text-center">진척도</th>
+                            {subjectGroups.map(({ subject, items }) => (
+                              <React.Fragment key={subject}>
+                                {/* 과목 그룹 헤더 */}
+                                <th colSpan={items.length}
+                                  className="border-b border-l-2 border-l-indigo-200 text-center cursor-pointer select-none hover:bg-indigo-50/50 transition-colors"
+                                  style={{background:'var(--sc-faint)'}}
+                                  onClick={() => setMatrixCollapsedSubjects(prev => ({...prev, [subject]: !prev[subject]}))}>
+                                  <div className="flex items-center justify-center gap-2 py-2 px-3">
+                                    <span className="text-[11px] font-black" style={{color:'var(--sc)'}}>{subject}</span>
+                                    <span className="text-[9px] font-bold text-slate-400">{items.length}개</span>
+                                    <ChevronDown size={12} style={{color:'var(--sc)'}} className={`transition-transform ${matrixCollapsedSubjects[subject] ? '-rotate-90' : ''}`}/>
                                   </div>
-                                )}
-                              </div>
-                              <span className="text-xs font-bold text-slate-700 block text-center leading-tight break-words whitespace-normal">{as.title}</span>
-                              {activeTab === 'matrix' && as.deadline && (() => {
-                                const today = new Date().toISOString().split('T')[0];
-                                const diff = Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24));
-                                const isOver = diff < 0;
-                                const isToday = diff === 0;
-                                const isClose = diff > 0 && diff <= 3;
-                                // 마감 초과 시 - 미완료 학생 수 계산
-                                if (isOver) {
-                                  const overDays = Math.abs(diff);
-                                  const incompleteCnt = visibleStudentsFiltered.filter(s => {
-                                    const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
-                                    const isTarget = as.type === 'all' || as.targetStudents?.includes(s.id);
-                                    return isTarget && ['not_started','in_progress','incomplete_red'].includes(st);
-                                  }).length;
-                                  if (incompleteCnt === 0) return null;
-                                  return (
-                                    <span className="mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none bg-red-100 text-red-600 border border-red-200">
-                                      <AlertTriangle size={9} />
-                                      {overDays}일 초과 · {incompleteCnt}명
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span className={`mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none ${isToday ? 'bg-orange-100 text-orange-600 border border-orange-200' : isClose ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
-                                    <Calendar size={9} />
-                                    {isToday ? '마감!' : `D-${diff}`}
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-800">
-                      {visibleStudentsFiltered.map(s => (
-                        <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group text-center">
-                          <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white z-20 border-r flex flex-col items-start gap-1 justify-center text-left">
-                            <div className="flex items-center justify-between w-full">
-                              <span className="truncate text-base font-black">{s.name}</span>
-                              <button onClick={() => setSelectedStudent(s)}><Search size={14} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
-                            </div>
-                            {(userRole === 'master' || userRole === 'teacher') && (
-                              <div className="flex flex-wrap gap-1 mt-1 leading-none">
-                                {s.homeroomTeacher && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold border border-indigo-100 leading-none"><UserCircle2 size={10} /> {s.homeroomTeacher}</span>}
-                                {s.highSchool && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded text-[9px] font-bold border border-slate-100 leading-none"><School size={10} /> {s.highSchool}</span>}
-                              </div>
+                                </th>
+                              </React.Fragment>
+                            ))}
+                          </tr>
+                          {/* 과제 제목 행 */}
+                          <tr>
+                            <th className="sticky left-0 bg-slate-50 z-30 border-r"/>
+                            <th className="border-r"/>
+                            {subjectGroups.map(({ subject, items }) =>
+                              matrixCollapsedSubjects[subject] ? null :
+                              items.map((as) => (
+                                <th key={as.id} className="p-4 min-w-[150px] border-b border-l border-slate-100 relative group text-center">
+                                  <div className="flex flex-col relative text-center">
+                                    <div className="flex justify-between items-start mb-1 text-left leading-none">
+                                      <span className="text-[9px] font-black text-indigo-600 uppercase tracking-tighter leading-none">{as.level}</span>
+                                      {userRole === 'master' && (
+                                        <button onClick={(e) => { e.stopPropagation(); setBulkSelectedDate(new Date().toISOString().split('T')[0]); setBulkSelectedStatus(null); setBulkDatePopup({ item: as, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }} className="px-1.5 py-0.5 bg-white border rounded text-[9px] font-black text-slate-600 hover:bg-slate-50 leading-none">일괄</button>
+                                      )}
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-700 block text-center leading-tight break-words whitespace-normal">{as.title}</span>
+                                    {activeTab === 'matrix' && as.deadline && (() => {
+                                      const today = new Date().toISOString().split('T')[0];
+                                      const diff = Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24));
+                                      const isOver = diff < 0;
+                                      const isToday = diff === 0;
+                                      const isClose = diff > 0 && diff <= 3;
+                                      if (isOver) {
+                                        const overDays = Math.abs(diff);
+                                        const incompleteCnt = visibleStudentsFiltered.filter(s => {
+                                          const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
+                                          const isTarget = as.type === 'all' || as.targetStudents?.includes(s.id);
+                                          return isTarget && ['not_started','in_progress','incomplete_red'].includes(st);
+                                        }).length;
+                                        if (incompleteCnt === 0) return null;
+                                        return (
+                                          <span className="mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none bg-red-100 text-red-600 border border-red-200">
+                                            <AlertTriangle size={9}/>{overDays}일 초과 · {incompleteCnt}명
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span className={`mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none ${isToday ? 'bg-orange-100 text-orange-600 border border-orange-200' : isClose ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
+                                          <Calendar size={9}/>{isToday ? '마감!' : `D-${diff}`}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+                                </th>
+                              ))
                             )}
-                          </td>
-                          <td className="p-4 border-r text-center">
-                            {(() => {
-                              const isMatrix = activeTab === 'matrix';
-                              const items = isMatrix ? assignments : memoItems;
-                              const subData = isMatrix ? submissions : memoSubmissions;
-                              const rel = items.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
-                              const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
-                              const effective = rel.length - exempt;
-                              const doneStatus = isMatrix ? ['completed'] : ['round_4'];
-                              const done = rel.filter(a => doneStatus.includes(subData[`${s.id}-${a.id}`]?.status)).length;
-                              const incomplete = isMatrix ? rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'incomplete_red').length : 0;
-                              const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
-                              const statInfo = isMatrix ? stats.assign[s.id] : stats.memo[s.id];
-
-                              if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
-
-                              return (
-                                <div className="flex flex-col items-center gap-1.5">
-                                  {/* 퍼센트 */}
-                                  <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
-                                  {/* 진행바 */}
-                                  <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
-                                  </div>
-                                  {/* 완료/전체 */}
-                                  <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
-                                  {/* 미완료 강조 */}
-                                  {incomplete > 0 && (
-                                    <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg border border-red-100 leading-none">미완료 {incomplete}</span>
-                                  )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-800">
+                          {visibleStudentsFiltered.map(s => (
+                            <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group text-center">
+                              <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white z-20 border-r flex flex-col items-start gap-1 justify-center text-left">
+                                <div className="flex items-center justify-between w-full">
+                                  <span className="truncate text-base font-black">{s.name}</span>
+                                  <button onClick={() => setSelectedStudent(s)}><Search size={14} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
                                 </div>
-                              );
-                            })()}
-                          </td>
-                          {(activeTab === 'matrix' ? assignments : memoItems).map(as => {
-                            const subKey = `${s.id}-${as.id}`;
-                            const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
-                            const status = sub?.status || 'not_started';
-                            if (!(as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id)))) return <td key={as.id} className="p-4 bg-slate-50/30 text-center font-bold text-[9px] text-slate-300 whitespace-nowrap leading-none">대상이 아닙니다.</td>;
-                            const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
-                            const isLate = status === 'completed' && as.deadline && sub.completionDate > as.deadline;
-                            const today = new Date().toISOString().split('T')[0];
-                            const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
-                            const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
-
-                            return (
-                              <td key={as.id} className="p-4 text-center relative">
-                                <div
-                                  onClick={(e) => { if (userRole === 'master') setStatusMenu({ studentId: s.id, itemId: as.id, category: activeTab === 'matrix' ? 'assignment' : 'memorization', x: e.clientX, y: e.clientY }); }}
-                                  className={`w-full py-2.5 rounded-xl transition-all flex flex-col items-center justify-center ${activeTab === 'matrix' ? (isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]) : `${cfg?.bg} ${cfg?.color}`} ${userRole === 'master' ? 'cursor-pointer hover:brightness-95 shadow-sm' : 'cursor-default'}`}
-                                >
-                                  {activeTab === 'matrix' ? (
-                                    status === 'completed' ? (isLate ? <History size={18} /> : <CheckCircle2 size={18} />) : status === 'in_progress' ? <Clock size={18} /> : status === 'incomplete_red' ? <AlertCircle size={18} /> : status === 'exempt' ? <MinusCircle size={18} /> : <Circle size={18} />
-                                  ) : (
-                                    <>{cfg?.icon && React.createElement(cfg.icon, { size: 18 })}{status !== 'not_started' && <span className="text-[8px] font-black mt-0.5">{cfg?.label}</span>}</>
-                                  )}
-                                  {isOverdue && (
-                                    <span className="mt-1 text-[8px] font-black text-red-600 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded-lg leading-none flex items-center gap-0.5">
-                                      <AlertTriangle size={8}/>{overDiff}일 초과
-                                    </span>
-                                  )}
-                                </div>
-                                {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
-                                  <div className="mt-1 leading-none">
-                                    {inlineDateEditKey === subKey ? (
-                                      <input type="date" value={sub.completionDate || ''} onChange={(e) => updateCompletionDate(s.id, as.id, e.target.value, activeTab === 'matrix' ? 'assignment' : 'memorization')} onBlur={() => setInlineDateEditKey(null)} className="text-[8px] border-none bg-indigo-50 rounded px-1 outline-none font-bold shadow-inner" autoFocus />
-                                    ) : (
-                                      <span onClick={(e) => { e.stopPropagation(); setInlineDateEditKey(subKey); }} className="text-[8px] font-bold text-slate-400 hover:text-indigo-600 cursor-pointer">{sub.completionDate?.split('-').slice(1).join('/') || '날짜'}</span>
-                                    )}
+                                {(userRole === 'master' || userRole === 'teacher') && (
+                                  <div className="flex flex-wrap gap-1 mt-1 leading-none">
+                                    {s.homeroomTeacher && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold border border-indigo-100 leading-none"><UserCircle2 size={10} /> {s.homeroomTeacher}</span>}
+                                    {s.highSchool && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded text-[9px] font-bold border border-slate-100 leading-none"><School size={10} /> {s.highSchool}</span>}
                                   </div>
                                 )}
                               </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                              <td className="p-4 border-r text-center">
+                                {(() => {
+                                  const isMatrix = activeTab === 'matrix';
+                                  const items = isMatrix ? assignments : memoItems;
+                                  const subData = isMatrix ? submissions : memoSubmissions;
+                                  const rel = items.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
+                                  const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
+                                  const effective = rel.length - exempt;
+                                  const doneStatus = isMatrix ? ['completed'] : ['round_4'];
+                                  const done = rel.filter(a => doneStatus.includes(subData[`${s.id}-${a.id}`]?.status)).length;
+                                  const incomplete = isMatrix ? rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'incomplete_red').length : 0;
+                                  const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
+                                  if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
+                                  return (
+                                    <div className="flex flex-col items-center gap-1.5">
+                                      <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
+                                      <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
+                                      </div>
+                                      <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
+                                      {incomplete > 0 && <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg border border-red-100 leading-none">미완료 {incomplete}</span>}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
+                              {subjectGroups.map(({ subject, items }) =>
+                                matrixCollapsedSubjects[subject]
+                                  ? <td key={subject+'-collapsed'} className="border-l-2 border-l-indigo-100 bg-indigo-50/20 px-3 text-center">
+                                      <span className="text-[9px] text-indigo-300 font-black">접힘</span>
+                                    </td>
+                                  : items.map(as => {
+                                      const subKey = `${s.id}-${as.id}`;
+                                      const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
+                                      const status = sub?.status || 'not_started';
+                                      if (!(as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id)))) return <td key={as.id} className="p-4 bg-slate-50/30 text-center font-bold text-[9px] text-slate-300 border-l border-slate-50">-</td>;
+                                      const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
+                                      const isLate = status === 'completed' && as.deadline && sub.completionDate > as.deadline;
+                                      const today = new Date().toISOString().split('T')[0];
+                                      const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
+                                      const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
+                                      return (
+                                        <td key={as.id} className="p-3 text-center relative border-l border-slate-50">
+                                          <div
+                                            onClick={(e) => { if (userRole === 'master') setStatusMenu({ studentId: s.id, itemId: as.id, category: activeTab === 'matrix' ? 'assignment' : 'memorization', x: e.clientX, y: e.clientY }); }}
+                                            className={`w-full py-2.5 rounded-xl transition-all flex flex-col items-center justify-center ${activeTab === 'matrix' ? (isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]) : `${cfg?.bg} ${cfg?.color}`} ${userRole === 'master' ? 'cursor-pointer hover:brightness-95 shadow-sm' : 'cursor-default'}`}
+                                          >
+                                            {activeTab === 'matrix' ? (
+                                              status === 'completed' ? (isLate ? <History size={16}/> : <CheckCircle2 size={16}/>) : status === 'in_progress' ? <Clock size={16}/> : status === 'incomplete_red' ? <AlertCircle size={16}/> : status === 'exempt' ? <MinusCircle size={16}/> : <Circle size={16}/>
+                                            ) : (
+                                              <>{cfg?.icon && React.createElement(cfg.icon, { size: 16 })}{status !== 'not_started' && <span className="text-[8px] font-black mt-0.5">{cfg?.label}</span>}</>
+                                            )}
+                                            {isOverdue && (
+                                              <span className="mt-1 text-[8px] font-black text-red-600 bg-red-100 border border-red-300 px-1.5 py-0.5 rounded-lg leading-none flex items-center gap-0.5">
+                                                <AlertTriangle size={8}/>{overDiff}일 초과
+                                              </span>
+                                            )}
+                                          </div>
+                                          {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
+                                            <div className="mt-1 leading-none">
+                                              {inlineDateEditKey === subKey ? (
+                                                <input type="date" value={sub.completionDate || ''} onChange={(e) => updateCompletionDate(s.id, as.id, e.target.value, activeTab === 'matrix' ? 'assignment' : 'memorization')} onBlur={() => setInlineDateEditKey(null)} className="text-[8px] border-none bg-indigo-50 rounded px-1 outline-none font-bold shadow-inner" autoFocus />
+                                              ) : (
+                                                <span onClick={(e) => { e.stopPropagation(); setInlineDateEditKey(subKey); }} className="text-[8px] font-bold text-slate-400 hover:text-indigo-600 cursor-pointer">{sub.completionDate?.split('-').slice(1).join('/') || '날짜'}</span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </td>
+                                      );
+                                    })
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
                 </div>
                 )}
               </div>
