@@ -936,18 +936,7 @@ export default function App() {
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center bg-white">
                   <h2 className="text-base font-bold flex items-center gap-2 shrink-0">{activeTab === 'matrix' ? <ClipboardCheck size={18}/> : <BrainCircuit size={18}/>} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
-                  <div className="flex flex-wrap gap-2 ml-auto items-center">
-                    {/* 과목 필터 */}
-                    <div className="flex gap-1 flex-wrap">
-                      {['전체', ...SUBJECTS].map(s => (
-                        <button key={s} onClick={() => setMatrixFilterSubject(s)}
-                          className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition-all ${matrixFilterSubject === s ? 'text-white border-transparent shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}
-                          style={matrixFilterSubject === s ? {background:'var(--sc)'} : {}}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                    {/* 완료 숨기기 토글 */}
+                  <div className="ml-auto">
                     <button onClick={() => setMatrixHideDone(v => !v)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixHideDone ? 'bg-blue-500 text-white border-blue-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
                       <CheckCircle2 size={12}/>{matrixHideDone ? '완료 숨김 중' : '완료 숨기기'}
@@ -1056,7 +1045,6 @@ export default function App() {
                     const allItems = activeTab === 'matrix' ? assignments : memoItems;
                     // 필터 적용
                     const filteredItems = allItems.filter(as => {
-                      if (matrixFilterSubject !== '전체' && as.subject !== matrixFilterSubject) return false;
                       if (matrixHideDone) {
                         // 모든 대상 학생이 완료했으면 숨김
                         const targets = visibleStudentsFiltered.filter(s => as.type === 'all' || as.targetStudents?.includes(s.id));
