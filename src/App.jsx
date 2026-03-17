@@ -236,7 +236,7 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
     const isToday = kstToday === dateStr;
     const { dim = false } = extra;
     return (
-      <div key={dateStr} className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all ${dim ? 'bg-slate-50/30' : 'hover:bg-teal-50/30'}`}>
+      <div key={`cell-${dateStr}-${dim?'dim':''}`} className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all ${dim ? 'bg-slate-50/30' : 'hover:bg-teal-50/30'}`}>
         <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1 ${isToday ? 'bg-teal-600 text-white' : dim ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300') : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>{day}</div>
         {dayPlans.length > 0 && (
           <div className="space-y-0.5">
@@ -1054,7 +1054,22 @@ export default function App() {
                                 const isOver = diff < 0;
                                 const isToday = diff === 0;
                                 const isClose = diff > 0 && diff <= 3;
-                                if (isOver) return null;
+                                // 마감 초과 시 - 미완료 학생 수 계산
+                                if (isOver) {
+                                  const overDays = Math.abs(diff);
+                                  const incompleteCnt = visibleStudentsFiltered.filter(s => {
+                                    const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
+                                    const isTarget = as.type === 'all' || as.targetStudents?.includes(s.id);
+                                    return isTarget && ['not_started','in_progress','incomplete_red'].includes(st);
+                                  }).length;
+                                  if (incompleteCnt === 0) return null;
+                                  return (
+                                    <span className="mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none bg-red-100 text-red-600 border border-red-200">
+                                      <AlertTriangle size={9} />
+                                      {overDays}일 초과 · {incompleteCnt}명
+                                    </span>
+                                  );
+                                }
                                 return (
                                   <span className={`mt-1.5 mx-auto flex items-center justify-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black w-fit leading-none ${isToday ? 'bg-orange-100 text-orange-600 border border-orange-200' : isClose ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
                                     <Calendar size={9} />
