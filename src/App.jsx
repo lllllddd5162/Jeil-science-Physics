@@ -930,6 +930,18 @@ export default function App() {
                     ))
                   )}
                 </div>
+                {activeTab === 'matrix' && (
+                  <div className="mt-4 px-4 py-3 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-start gap-2.5">
+                    <Calculator size={14} className="text-indigo-400 mt-0.5 shrink-0"/>
+                    <div>
+                      <p className="text-[11px] font-black text-indigo-700 mb-1">진척도 % 계산 방식</p>
+                      <p className="text-[10px] font-bold text-indigo-500 leading-relaxed">
+                        <span className="bg-white px-1.5 py-0.5 rounded-lg border border-indigo-100 mr-1">완료 ÷ (완료 + 미완료) × 100</span>
+                        시작 전 · 진행 중 · 해당 없음은 계산에서 제외됩니다.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
@@ -1163,23 +1175,40 @@ export default function App() {
                                   const items = isMatrix ? assignments : memoItems;
                                   const subData = isMatrix ? submissions : memoSubmissions;
                                   const rel = items.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
-                                  const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
-                                  const effective = rel.length - exempt;
-                                  const doneStatus = isMatrix ? ['completed'] : ['round_4'];
-                                  const done = rel.filter(a => doneStatus.includes(subData[`${s.id}-${a.id}`]?.status)).length;
-                                  const incomplete = isMatrix ? rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'incomplete_red').length : 0;
-                                  const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
-                                  if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
-                                  return (
-                                    <div className="flex flex-col items-center gap-1.5">
-                                      <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
-                                      <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
+                                  if (isMatrix) {
+                                    // 과제: 완료+미완료만 분모, 나머지 제외
+                                    const done = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'completed').length;
+                                    const incomplete = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
+                                    const effective = done + incomplete; // 완료 + 미완료만
+                                    const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
+                                    if (effective === 0) return <span className="text-[10px] font-black text-slate-300">집계 중</span>;
+                                    return (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
+                                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                          <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
+                                        </div>
+                                        <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
+                                        {incomplete > 0 && <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg border border-red-100 leading-none">미완료 {incomplete}</span>}
                                       </div>
-                                      <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
-                                      {incomplete > 0 && <span className="text-[9px] font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg border border-red-100 leading-none">미완료 {incomplete}</span>}
-                                    </div>
-                                  );
+                                    );
+                                  } else {
+                                    // 암기: 기존 방식 유지
+                                    const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
+                                    const effective = rel.length - exempt;
+                                    const done = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'round_4').length;
+                                    const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
+                                    if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
+                                    return (
+                                      <div className="flex flex-col items-center gap-1.5">
+                                        <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
+                                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                          <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
+                                        </div>
+                                        <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
+                                      </div>
+                                    );
+                                  }
                                 })()}
                               </td>
                               {subjectGroups.map(({ subject, items }) =>
