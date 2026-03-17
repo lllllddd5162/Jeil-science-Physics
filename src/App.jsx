@@ -1726,7 +1726,7 @@ export default function App() {
                   <div className="space-y-4">
                     {/* 탭 선택 */}
                     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-2 flex gap-2">
-                      {[['summary', BarChart3, '학생 요약'], ['print', Printer, '인쇄용 리포트']].map(([mode, Icon, label]) => (
+                      {[['summary', BarChart3, '학생 요약'], ['daily', Calendar, '일자별 리포트'], ['print', Printer, '인쇄용 리포트']].map(([mode, Icon, label]) => (
                         <button key={mode} onClick={() => setReportViewMode(mode)}
                           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-sm transition-all ${reportViewMode === mode ? 'text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}
                           style={reportViewMode === mode ? {background:'var(--sc)'} : {}}>
@@ -1734,6 +1734,266 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+
+                    {/* ── 일자별 수업 리포트 ── */}
+                    {reportViewMode === 'daily' && (() => {
+                      // 수업이 있는 날짜만 추출 (progressPlans 기준)
+                      const lessonDates = [...new Set(rangedPlans.map(p => p.date))].sort((a,b) => b.localeCompare(a));
+                      const DOW = ['일','월','화','수','목','금','토'];
+
+                      if (lessonDates.length === 0) return (
+                        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-12 text-center">
+                          <Calendar size={32} className="text-slate-200 mx-auto mb-3"/>
+                          <p className="font-black text-slate-400">해당 기간에 수업 기록이 없습니다.</p>
+                        </div>
+                      );
+
+                      return (
+                        <div className="space-y-4">
+                          {/* 인쇄 버튼 */}
+                          <div className="flex justify-end">
+                            <button onClick={() => window.print()}
+                              className="flex items-center gap-2 px-5 py-2.5 text-white rounded-2xl font-black text-sm shadow-md transition-all active:scale-95"
+                              style={{background:'var(--sc)'}}>
+                              <Printer size={15}/> 인쇄
+                            </button>
+                          </div>
+
+                          <div id="print-report" className="space-y-6">
+                            {lessonDates.map(date => {
+                              const dayPlans = rangedPlans.filter(p => p.date === date);
+                              const dow = DOW[new Date(date).getDay()];
+                              const isWeekend = [0,6].includes(new Date(date).getDay());
+
+                              // 그날 시험
+                              const dayTests = rangedTests.filter(t => t.date === date);
+
+                              // 그날 마감 과제
+                              const dayDeadlineAssigns = rangedAssign.filter(a => a.deadline === date);
+
+                              // 출결 데이터
+                              const attList = students.map(s => {
+                                const att = attendance[`${s.id}-${date}`] || { status: 'none', makeup: false };
+                                const makeupDate = makeupDates[`${s.id}-${date}`] || '';
+                                // 출결 이외 날짜 attendanceNotes
+                                const note = attendanceNotes[`${s.id}-${date}`] || '';
+                                return { s, att, makeupDate, note };
+                              });
+
+                              const presentList  = attList.filter(x => x.att.status === 'present');
+                              const absentList   = attList.filter(x => x.att.status === 'absent');
+                              const lateList     = attList.filter(x => x.att.status === 'late');
+                              const noneList     = attList.filter(x => x.att.status === 'none');
+
+                              return (
+                                <div key={date} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                                  {/* 날짜 헤더 */}
+                                  <div className="flex items-center gap-4 px-6 py-4" style={{background:'var(--sc)'}}>
+                                    <div className="flex flex-col items-center justify-center w-12 h-12 bg-white/20 rounded-2xl shrink-0">
+                                      <span className="text-white/70 text-[9px] font-black leading-none">{date.slice(0,7)}</span>
+                                      <span className="text-white text-xl font-black leading-tight">{date.slice(8)}</span>
+                                    </div>
+                                    <div>
+                                      <p className={`text-lg font-black leading-none ${isWeekend ? 'text-red-200' : 'text-white'}`}>{dow}요일</p>
+                                      <p className="text-white/60 text-xs font-bold mt-1">{date}</p>
+                                    </div>
+                                    <div className="ml-auto flex gap-2 flex-wrap justify-end">
+                                      <span className="text-[10px] font-black bg-white/20 text-white px-2.5 py-1 rounded-full">수업 {dayPlans.length}건</span>
+                                      {dayTests.length > 0 && <span className="text-[10px] font-black bg-orange-300/40 text-white px-2.5 py-1 rounded-full">시험 {dayTests.length}</span>}
+                                      {absentList.length > 0 && <span className="text-[10px] font-black bg-red-300/40 text-white px-2.5 py-1 rounded-full">결석 {absentList.length}</span>}
+                                    </div>
+                                  </div>
+
+                                  <div className="p-5 space-y-5">
+                                    {/* 수업 내용 */}
+                                    <div>
+                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><TrendingUp size={11}/> 수업 내용</p>
+                                      <div className="space-y-1.5">
+                                        {dayPlans.map(p => {
+                                          const lt = LESSON_TYPES.find(l => l.id === (p.lessonType || '진도')) || LESSON_TYPES[0];
+                                          return (
+                                            <div key={p.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border bg-slate-50 ${p.done ? 'opacity-60' : ''}`}>
+                                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${lt.light}`}>{p.lessonType || '진도'}</span>
+                                              <span className="text-[11px] font-black text-slate-500 shrink-0">{p.subject}</span>
+                                              <span className={`text-sm font-black text-slate-800 flex-1 ${p.done ? 'line-through' : ''}`}>{p.unit}</span>
+                                              {p.done && <span className="text-[9px] font-black text-teal-500 bg-teal-50 px-1.5 py-0.5 rounded-lg shrink-0">완료</span>}
+                                              {p.memo && <span className="text-[10px] text-slate-400 font-medium italic shrink-0 max-w-[120px] truncate">{p.memo}</span>}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+
+                                    {/* 시험 성적 (그날 시험이 있을 때만) */}
+                                    {dayTests.map(t => {
+                                      const scoreList = students.map(s => ({ s, sc: testScores[`${s.id}-${t.id}`]?.score }));
+                                      const validScores = scoreList.filter(x => x.sc != null);
+                                      const avg = validScores.length ? (validScores.reduce((a,b) => a+b.sc, 0) / validScores.length).toFixed(1) : null;
+                                      return (
+                                        <div key={t.id}>
+                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Trophy size={11} className="text-orange-500"/> 시험 — {t.title} {t.difficulty && <span className="text-orange-400">({t.difficulty})</span>}</p>
+                                          <div className="overflow-x-auto rounded-2xl border border-orange-100">
+                                            <table className="w-full border-collapse text-sm">
+                                              <thead>
+                                                <tr className="bg-orange-50">
+                                                  <th className="px-4 py-2.5 text-left font-black text-[10px] text-orange-600 uppercase tracking-widest sticky left-0 bg-orange-50">학생</th>
+                                                  <th className="px-4 py-2.5 text-center font-black text-[10px] text-orange-600 uppercase tracking-widest">점수</th>
+                                                  <th className="px-4 py-2.5 text-center font-black text-[10px] text-orange-600 uppercase tracking-widest">등급</th>
+                                                  <th className="px-4 py-2.5 text-left font-black text-[10px] text-orange-600 uppercase tracking-widest">계획/메모</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-orange-50">
+                                                {scoreList.map(({ s, sc }) => {
+                                                  const plan = testScores[`${s.id}-${t.id}`]?.plan || '';
+                                                  const grade = t.scales ? [...t.scales].sort((a,b)=>b.min-a.min).find(g => sc != null && sc >= g.min) : null;
+                                                  return (
+                                                    <tr key={s.id} className="hover:bg-orange-50/30 transition-colors">
+                                                      <td className="px-4 py-2.5 font-black text-slate-800 sticky left-0 bg-white">{s.name}</td>
+                                                      <td className="px-4 py-2.5 text-center">
+                                                        {sc != null
+                                                          ? <span className={`font-black text-base ${sc>=80?'text-blue-600':sc>=60?'text-amber-500':'text-red-500'}`}>{sc}점</span>
+                                                          : <span className="text-slate-200 text-xs font-bold">미응시</span>}
+                                                      </td>
+                                                      <td className="px-4 py-2.5 text-center">
+                                                        {grade ? <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">{grade.icon} {grade.label}</span> : <span className="text-slate-200 text-xs">-</span>}
+                                                      </td>
+                                                      <td className="px-4 py-2.5 text-xs font-medium text-slate-500 italic">{plan || '-'}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                                {avg && (
+                                                  <tr className="bg-orange-50/60">
+                                                    <td className="px-4 py-2 font-black text-orange-600 text-[11px]">반 평균</td>
+                                                    <td className="px-4 py-2 text-center font-black text-orange-600">{avg}점</td>
+                                                    <td colSpan={2}/>
+                                                  </tr>
+                                                )}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+
+                                    {/* 마감 과제 현황 (그날이 마감일인 과제) */}
+                                    {dayDeadlineAssigns.length > 0 && (
+                                      <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><ClipboardCheck size={11} className="text-indigo-500"/> 마감 과제 현황</p>
+                                        <div className="overflow-x-auto rounded-2xl border border-indigo-100">
+                                          <table className="w-full border-collapse text-sm">
+                                            <thead>
+                                              <tr className="bg-indigo-50">
+                                                <th className="px-4 py-2.5 text-left font-black text-[10px] text-indigo-600 uppercase tracking-widest sticky left-0 bg-indigo-50">학생</th>
+                                                {dayDeadlineAssigns.map(a => (
+                                                  <th key={a.id} className="px-3 py-2.5 text-center font-black text-[10px] text-indigo-600 min-w-[100px]">
+                                                    <p className="truncate max-w-[100px]">{a.title}</p>
+                                                    <p className="text-indigo-400 font-bold opacity-70">{a.subject}</p>
+                                                  </th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-indigo-50">
+                                              {students.map((s, idx) => (
+                                                <tr key={s.id} className={idx%2===0?'bg-white':'bg-slate-50/30'}>
+                                                  <td className="px-4 py-2.5 font-black text-slate-800 sticky left-0 bg-white">{s.name}</td>
+                                                  {dayDeadlineAssigns.map(a => {
+                                                    const isTarget = a.type === 'all' || a.targetStudents?.includes(s.id);
+                                                    if (!isTarget) return <td key={a.id} className="px-3 py-2.5 text-center"><span className="text-slate-200 text-[10px] font-bold">-</span></td>;
+                                                    const sub = submissions[`${s.id}-${a.id}`] || {};
+                                                    const status = sub.status || 'not_started';
+                                                    const cfg = ASSIGN_STATUS_CONFIG[status];
+                                                    const isLate = status === 'completed' && sub.completionDate > date;
+                                                    return (
+                                                      <td key={a.id} className="px-3 py-2.5 text-center">
+                                                        <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-lg ${isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]}`}>
+                                                          {React.createElement(cfg.icon, { size: 10 })}
+                                                          {isLate ? '지각완료' : cfg.label}
+                                                        </span>
+                                                        {sub.completionDate && <p className="text-[9px] text-slate-400 font-bold mt-0.5">{sub.completionDate.slice(5)}</p>}
+                                                      </td>
+                                                    );
+                                                  })}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* 출결 표 */}
+                                    <div>
+                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><UserCheck size={11} className="text-emerald-500"/> 출결 현황</p>
+                                      <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                                        <table className="w-full border-collapse text-sm">
+                                          <thead>
+                                            <tr className="bg-slate-50">
+                                              <th className="px-4 py-2.5 text-left font-black text-[10px] text-slate-500 uppercase tracking-widest sticky left-0 bg-slate-50">학생</th>
+                                              <th className="px-4 py-2.5 text-center font-black text-[10px] text-slate-500 uppercase tracking-widest">출결</th>
+                                              <th className="px-4 py-2.5 text-center font-black text-[10px] text-slate-500 uppercase tracking-widest">보충</th>
+                                              <th className="px-4 py-2.5 text-left font-black text-[10px] text-slate-500 uppercase tracking-widest">특이사항</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100">
+                                            {attList.map(({ s, att, makeupDate, note }, idx) => {
+                                              const statusMap = {
+                                                present: { label: '출석', cls: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
+                                                absent:  { label: '결석', cls: 'text-red-500 bg-red-50 border-red-100' },
+                                                late:    { label: '지각', cls: 'text-amber-600 bg-amber-50 border-amber-100' },
+                                                none:    { label: '미기록', cls: 'text-slate-300 bg-slate-50 border-slate-100' },
+                                              };
+                                              const sm = statusMap[att.status] || statusMap.none;
+                                              return (
+                                                <tr key={s.id} className={`${att.status === 'absent' ? 'bg-red-50/30' : att.status === 'late' ? 'bg-amber-50/20' : idx%2===0?'bg-white':'bg-slate-50/30'}`}>
+                                                  <td className="px-4 py-2.5 font-black text-slate-800 sticky left-0 bg-inherit">{s.name}</td>
+                                                  <td className="px-4 py-2.5 text-center">
+                                                    <span className={`inline-flex items-center font-black text-[11px] px-2.5 py-1 rounded-xl border ${sm.cls}`}>{sm.label}</span>
+                                                  </td>
+                                                  <td className="px-4 py-2.5 text-center">
+                                                    {att.makeup
+                                                      ? <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="text-[10px] font-black text-purple-600 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-100">보충 완료</span>
+                                                          {makeupDate && <span className="text-[9px] text-purple-400 font-bold">{makeupDate.slice(5)}</span>}
+                                                        </div>
+                                                      : att.status === 'absent'
+                                                        ? <span className="text-[10px] font-black text-slate-300">미보충</span>
+                                                        : <span className="text-slate-200 text-[10px]">-</span>}
+                                                  </td>
+                                                  <td className="px-4 py-2.5 text-xs text-slate-500 font-medium italic">
+                                                    {note || (att.status === 'absent' && !att.makeup ? '보충 일정 미정' : '-')}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                          {/* 요약 행 */}
+                                          <tfoot>
+                                            <tr className="bg-slate-50 border-t-2 border-slate-200">
+                                              <td className="px-4 py-2 font-black text-slate-500 text-[11px]">합계</td>
+                                              <td className="px-4 py-2 text-center">
+                                                <div className="flex justify-center gap-2 text-[10px] font-black">
+                                                  <span className="text-emerald-600">출석 {presentList.length}</span>
+                                                  {lateList.length > 0 && <span className="text-amber-600">지각 {lateList.length}</span>}
+                                                  {absentList.length > 0 && <span className="text-red-500">결석 {absentList.length}</span>}
+                                                </div>
+                                              </td>
+                                              <td className="px-4 py-2 text-center text-[10px] font-black text-purple-500">
+                                                {attList.filter(x=>x.att.makeup).length > 0 ? `보충 ${attList.filter(x=>x.att.makeup).length}명` : '-'}
+                                              </td>
+                                              <td/>
+                                            </tr>
+                                          </tfoot>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* ── 학생 요약형 ── */}
                     {reportViewMode === 'summary' && (
