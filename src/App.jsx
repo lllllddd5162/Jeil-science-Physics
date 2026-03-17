@@ -351,7 +351,6 @@ export default function App() {
   const [editPlanId, setEditPlanId] = useState(null);
   const [editPlanData, setEditPlanData] = useState(null);
 
-  const [matrixFilterSubject, setMatrixFilterSubject] = useState('전체');
   const [matrixHideDone, setMatrixHideDone] = useState(false);
   const [matrixCollapsedSubjects, setMatrixCollapsedSubjects] = useState({});
 
