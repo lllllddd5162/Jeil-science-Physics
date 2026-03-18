@@ -502,6 +502,8 @@ export default function App() {
   const [studentNotes, setStudentNotes] = useState({});
   const [studentScoreData, setStudentScoreData] = useState({});
   const [subjects, setSubjects] = useState(['물리', '화학', '생명과학', '지구과학', '통합과학']);
+  const [editingSubjects, setEditingSubjects] = useState(false);
+  const [subjectInput, setSubjectInput] = useState('');
   const [progressPlans, setProgressPlans] = useState([]);
   const [progressCalMonth, setProgressCalMonth] = useState(() => {
     const k = new Date(Date.now() + 9*60*60*1000);
@@ -3331,8 +3333,6 @@ export default function App() {
             <div className="max-w-4xl mx-auto space-y-6 text-left">
               {/* 과목 설정 - master 전용 */}
               {userRole === 'master' && (() => {
-                const [editingSubjects, setEditingSubjects] = React.useState(false);
-                const [subjectInput, setSubjectInput] = React.useState('');
                 const saveSubjects = async (newList) => {
                   await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { subjects: newList }, { merge: true });
                 };
