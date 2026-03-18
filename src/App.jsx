@@ -961,7 +961,21 @@ export default function App() {
                   <div className="divide-y divide-slate-100">
                     {visibleStudentsFiltered.map(s => {
                       const items = activeTab === 'matrix' ? assignments : memoItems;
-                      const progressStat = activeTab === 'matrix' ? stats.assign[s.id] : stats.memo[s.id];
+
+                      // 진척도 계산
+                      let pctText, labelText;
+                      if (activeTab === 'matrix') {
+                        const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
+                        const done = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
+                        const incomplete = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
+                        const effective = done + incomplete;
+                        pctText = effective > 0 ? `${Math.round(done / effective * 100)}%` : '-';
+                        labelText = effective > 0 ? `${done}/${effective} 완료` : '집계 중';
+                      } else {
+                        const progressStat = stats.memo[s.id];
+                        pctText = `${progressStat?.percent || '0.0'}%`;
+                        labelText = progressStat?.label || '-';
+                      }
                       return (
                         <div key={s.id} className="p-4">
                           {/* 학생 헤더 */}
@@ -975,8 +989,8 @@ export default function App() {
                             </div>
                             <div className="flex items-center gap-2">
                               <div className={`text-right px-3 py-1.5 rounded-xl ${activeTab === 'matrix' ? 'bg-indigo-50' : 'bg-purple-50'}`}>
-                                <p className={`text-xs font-black ${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'}`}>{progressStat?.label || '-'}</p>
-                                <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{progressStat?.percent || '0.0'}%</p>
+                                <p className={`text-xs font-black ${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'}`}>{pctText}</p>
+                                <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{labelText}</p>
                               </div>
                               <button onClick={() => setSelectedStudent(s)}><Search size={16} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
                             </div>
