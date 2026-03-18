@@ -487,6 +487,7 @@ export default function App() {
   const [editPlanData, setEditPlanData] = useState(null);
 
   const [matrixHideDone, setMatrixHideDone] = useState(false);
+  const [collapsedWeeks, setCollapsedWeeks] = useState({});
 
   // UI Support
   const [currentDate, setCurrentDate] = useState(() => {
@@ -1219,10 +1220,46 @@ export default function App() {
                       return true;
                     });
 
-                    // 과목별 그룹핑
+                    // 주차 계산 헬퍼 (마감일 기준 월~일)
+                    const getWeekKey = (dateStr) => {
+                      if (!dateStr) return 'no-deadline';
+                      const d = new Date(dateStr);
+                      const day = d.getDay();
+                      const mon = new Date(d);
+                      mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+                      return mon.toISOString().slice(0, 10);
+                    };
+                    const getWeekLabel = (wk) => {
+                      if (wk === 'no-deadline') return '마감일 미정';
+                      const mon = new Date(wk);
+                      const sun = new Date(wk); sun.setDate(mon.getDate() + 6);
+                      const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
+                      return `${fmt(mon)} ~ ${fmt(sun)}`;
+                    };
+                    const todayKst = new Date(Date.now() + 9*60*60*1000).toISOString().slice(0, 10);
+                    const thisWeekKey = getWeekKey(todayKst);
+
+                    // 주차 그룹핑 (matrix 탭만)
+                    const weekGroups = activeTab === 'matrix' ? (() => {
+                      const wm = {};
+                      filteredItems.forEach(as => { const wk = getWeekKey(as.deadline); if (!wm[wk]) wm[wk] = []; wm[wk].push(as); });
+                      return Object.entries(wm)
+                        .sort(([a],[b]) => a === 'no-deadline' ? 1 : b === 'no-deadline' ? -1 : a.localeCompare(b))
+                        .map(([wk, items]) => ({ wk, label: getWeekLabel(wk), items, isThisWeek: wk === thisWeekKey }));
+                    })() : [];
+
+                    // 접힘 상태: 기본은 이번 주차만 펼침
+                    const isWeekCollapsed = (wk, isThisWeek) => collapsedWeeks[wk] !== undefined ? collapsedWeeks[wk] : !isThisWeek;
+
+                    // 화면에 보일 items (접힌 주차 제외)
+                    const visibleItems = activeTab === 'matrix'
+                      ? weekGroups.flatMap(({ wk, items, isThisWeek }) => isWeekCollapsed(wk, isThisWeek) ? [] : items)
+                      : filteredItems;
+
+                    // 과목별 그룹핑 (visibleItems 기준)
                     const subjectGroups = SUBJECTS.map(sub => ({
                       subject: sub,
-                      items: filteredItems.filter(a => a.subject === sub)
+                      items: visibleItems.filter(a => a.subject === sub)
                     })).filter(g => g.items.length > 0);
 
                     if (filteredItems.length === 0) return (
@@ -1234,6 +1271,32 @@ export default function App() {
                     );
 
                     return (
+                      <div>
+                      {/* 주차 탭 버튼 (matrix만) */}
+                      {activeTab === 'matrix' && weekGroups.length > 0 && (
+                        <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-2 items-center bg-slate-50/50">
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">주차</span>
+                          {weekGroups.map(({ wk, label, isThisWeek, items }) => {
+                            const collapsed = isWeekCollapsed(wk, isThisWeek);
+                            const incompleteCnt = collapsed ? items.reduce((cnt, as) =>
+                              cnt + visibleStudentsFiltered.filter(s => {
+                                const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
+                                return (as.type === 'all' || as.targetStudents?.includes(s.id)) && ['not_started','in_progress','incomplete_red'].includes(st);
+                              }).length, 0) : 0;
+                            return (
+                              <button key={wk}
+                                onClick={() => setCollapsedWeeks(prev => ({ ...prev, [wk]: !isWeekCollapsed(wk, isThisWeek) }))}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${!collapsed ? 'text-white border-transparent shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                                style={!collapsed ? {background:'var(--sc)'} : {}}>
+                                {isThisWeek && <span className="text-[8px] opacity-70">이번주</span>}
+                                {label}
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${!collapsed ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>{items.length}</span>
+                                {incompleteCnt > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-black bg-red-100 text-red-500">{incompleteCnt}미완</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                       <table className="w-full text-left border-collapse">
                         <thead className="bg-slate-50/50 text-slate-400">
                           <tr>
@@ -1404,6 +1467,7 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     );
                   })()}
                 </div>
