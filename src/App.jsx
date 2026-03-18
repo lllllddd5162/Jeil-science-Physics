@@ -1502,19 +1502,17 @@ export default function App() {
                                       </div>
                                     );
                                   } else {
-                                    // 암기: 기존 방식 유지
-                                    const exempt = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'exempt').length;
-                                    const effective = rel.length - exempt;
-                                    const done = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'round_4').length;
-                                    const pct = effective > 0 ? Math.round(done / effective * 100) : 0;
-                                    if (effective === 0) return <span className="text-[10px] font-black text-slate-300">미부여</span>;
+                                    // 암기: stats.memo 기반 회독 진척도
+                                    const memoStat = stats.memo[s.id];
+                                    if (!memoStat || memoStat.label === '미부여') return <span className="text-[10px] font-black text-slate-300">미부여</span>;
+                                    const pct = parseFloat(memoStat.percent);
                                     return (
                                       <div className="flex flex-col items-center gap-1.5">
+                                        <span className={`text-[10px] font-black leading-none ${pct===100?'text-blue-600':'text-purple-500'}`}>{memoStat.label}</span>
                                         <span className={`text-base font-black leading-none ${pct===100?'text-blue-600':pct>=50?'text-indigo-500':'text-slate-500'}`}>{pct}%</span>
                                         <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                           <div className={`h-full rounded-full transition-all ${pct===100?'bg-blue-400':pct>=50?'bg-indigo-400':'bg-slate-300'}`} style={{width: pct+'%'}} />
                                         </div>
-                                        <span className="text-[10px] font-bold text-slate-400 leading-none">{done}/{effective}</span>
                                       </div>
                                     );
                                   }
