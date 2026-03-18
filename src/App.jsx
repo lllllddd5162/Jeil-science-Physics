@@ -1619,11 +1619,32 @@ export default function App() {
               {userRole === 'master' && (
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-left text-slate-800">
                   <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-600 leading-none"><Trophy size={20} /> 신규 시험 등록</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                    <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1">실시 일자</p><input type="date" value={newTest.date} onChange={(e) => setNewTest({ ...newTest, date: e.target.value })} className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 transition-all text-slate-800 shadow-sm" /></div>
-                    <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1 text-left">시험 명칭</p><BufferedInput value={newTest.title} onSave={(v) => setNewTest({ ...newTest, title: v })} placeholder="제목..." className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm" /></div>
-                    <div className="space-y-1 text-left"><p className="text-[10px] uppercase font-black ml-1 text-left">출처</p><BufferedInput value={newTest.source} onSave={(v) => setNewTest({ ...newTest, source: v })} placeholder="출처..." className="w-full px-4 py-3 rounded-2xl font-bold border bg-slate-50 outline-none shadow-sm" /></div>
-                    <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1 text-left">난이도 및 등록</p><div className="flex gap-2"><select value={newTest.difficulty} onChange={(e) => setNewTest({ ...newTest, difficulty: e.target.value })} className="flex-1 px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm">{DIFFICULTIES.map(d => <option key={d}>{d}</option>)}</select><button onClick={addTest} className="bg-orange-500 text-white px-6 py-3 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all">등록</button></div></div>
+                  <div className="space-y-3 mb-4">
+                    {/* 모바일: 세로 / 데스크탑: 4열 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <p className="text-[10px] uppercase font-black ml-1">실시 일자</p>
+                        <input type="date" value={newTest.date} onChange={(e) => setNewTest({ ...newTest, date: e.target.value })}
+                          className="w-full min-w-0 px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 transition-all text-slate-800 shadow-sm"
+                          style={{WebkitAppearance:'none',appearance:'none'}} />
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <p className="text-[10px] uppercase font-black ml-1">시험 명칭</p>
+                        <BufferedInput value={newTest.title} onSave={(v) => setNewTest({ ...newTest, title: v })} placeholder="제목..." className="w-full px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm" />
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <p className="text-[10px] uppercase font-black ml-1">출처</p>
+                        <BufferedInput value={newTest.source} onSave={(v) => setNewTest({ ...newTest, source: v })} placeholder="출처..." className="w-full px-3 py-3 rounded-2xl font-bold border bg-slate-50 outline-none shadow-sm" />
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <p className="text-[10px] uppercase font-black ml-1">난이도</p>
+                        <select value={newTest.difficulty} onChange={(e) => setNewTest({ ...newTest, difficulty: e.target.value })}
+                          className="w-full px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm">
+                          {DIFFICULTIES.map(d => <option key={d}>{d}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <button onClick={addTest} className="w-full bg-orange-500 text-white py-3 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all active:scale-95">등록</button>
                   </div>
                   {/* 테스트 종류 선택 */}
                   <div className="flex gap-2 mb-4">
@@ -1759,7 +1780,13 @@ export default function App() {
                                     <div key={t.id} className="rounded-2xl border border-orange-100 bg-orange-50/30 px-3 py-2.5">
                                       <div className="flex items-start justify-between gap-2 mb-1">
                                         <div className="min-w-0 flex-1">
-                                          <p className="text-[9px] font-black text-orange-400 mb-0.5">{t.date}{t.source ? ` · ${t.source}` : ''}</p>
+                                          <div className="flex items-center gap-1.5 mb-0.5">
+                                            <p className="text-[9px] font-black text-orange-400 flex-1">{t.date}{t.source ? ` · ${t.source}` : ''}</p>
+                                            <button onClick={() => { setSelectedTest(t); if (userRole === 'master') setIsTestEditMode(false); }}
+                                              className="p-1 hover:bg-orange-200 rounded-lg transition-colors shrink-0">
+                                              <Search size={12} className="text-orange-400"/>
+                                            </button>
+                                          </div>
                                           <p className="text-xs font-black text-slate-700 leading-snug break-keep">{t.title}</p>
                                         </div>
                                         <div className="shrink-0 text-right">
@@ -2010,7 +2037,13 @@ export default function App() {
                                     <div key={t.id} className="rounded-2xl border border-slate-100 bg-slate-50/50 px-3 py-2.5">
                                       <div className="flex items-start justify-between gap-2 mb-1">
                                         <div className="min-w-0 flex-1">
-                                          <p className="text-[9px] font-black text-slate-400 mb-0.5">{t.date}{t.source ? ` · ${t.source}` : ''}</p>
+                                          <div className="flex items-center gap-1.5 mb-0.5">
+                                            <p className="text-[9px] font-black text-slate-400 flex-1">{t.date}{t.source ? ` · ${t.source}` : ''}</p>
+                                            <button onClick={() => { setSelectedTest(t); if (userRole === 'master') setIsTestEditMode(false); }}
+                                              className="p-1 hover:bg-slate-200 rounded-lg transition-colors shrink-0">
+                                              <Search size={12} className="text-slate-400"/>
+                                            </button>
+                                          </div>
                                           <p className="text-xs font-black text-slate-700 leading-snug break-keep">{t.title}</p>
                                         </div>
                                         <p className="text-base font-black text-slate-800 leading-none shrink-0">{score !== '' && score != null ? `${score}점` : '-'}</p>
@@ -4353,18 +4386,29 @@ export default function App() {
               <div className="p-4 md:p-8 space-y-4 md:space-y-6 max-h-[80vh] overflow-y-auto text-left">
                 <div className="bg-slate-50 rounded-2xl md:rounded-[2rem] p-4 md:p-8 border border-slate-100 shadow-inner text-left font-bold">
                   {isTestEditMode ? (
-                    <div className="space-y-4">
-                      <input type="date" value={selectedTest.date} onChange={(e) => setSelectedTest({ ...selectedTest, date: e.target.value })} className="w-full px-4 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-indigo-500 outline-none" />
-                      <BufferedInput value={selectedTest.title} onSave={(v) => setSelectedTest({ ...selectedTest, title: v })} className="w-full px-4 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white" />
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">출처</p>
-                        <BufferedInput value={selectedTest.source} onSave={(v) => setSelectedTest({ ...selectedTest, source: v })} placeholder="출처 입력..." className="w-full px-4 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-indigo-500 outline-none" />
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">실시 일자</p>
+                          <input type="date" value={selectedTest.date} onChange={(e) => setSelectedTest({ ...selectedTest, date: e.target.value })}
+                            className="w-full min-w-0 px-3 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-indigo-500 outline-none"
+                            style={{WebkitAppearance:'none',appearance:'none'}} />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">출처</p>
+                          <BufferedInput value={selectedTest.source} onSave={(v) => setSelectedTest({ ...selectedTest, source: v })} placeholder="출처..." className="w-full px-3 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-indigo-500 outline-none" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">시험 명칭</p>
+                        <BufferedInput value={selectedTest.title} onSave={(v) => setSelectedTest({ ...selectedTest, title: v })} className="w-full px-3 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white" />
                       </div>
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">난이도</p>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-1.5">
                           {DIFFICULTIES.map(d => (
-                            <button key={d} onClick={() => setSelectedTest({ ...selectedTest, difficulty: d })} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all ${selectedTest.difficulty === d ? 'bg-orange-500 border-orange-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}`}>{d}</button>
+                            <button key={d} onClick={() => setSelectedTest({ ...selectedTest, difficulty: d })}
+                              className={`flex-1 py-2.5 rounded-xl text-xs font-black border-2 transition-all ${selectedTest.difficulty === d ? 'bg-orange-500 border-orange-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400'}`}>{d}</button>
                           ))}
                         </div>
                       </div>
