@@ -210,8 +210,15 @@ const BufferedTextarea = ({ value, onSave, placeholder, className, disabled = fa
 };
 
 // --- Progress Mini Calendar Component ---
-function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday, attendance, students, makeupDates }) {
+function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday, attendance, students, makeupDates, onDateSelect }) {
   const [selectedDate, setSelectedDate] = useState(null);
+
+  const handleDateClick = (dateStr, dim) => {
+    if (dim) setProgressCalMonth(dateStr.slice(0, 7));
+    setSelectedDate(dateStr);
+    if (onDateSelect) onDateSelect(dateStr);
+  };
+
   const [calYear, calMonthIdx] = progressCalMonth.split('-').map(Number);
   const firstDay = new Date(calYear, calMonthIdx - 1, 1).getDay();
   const daysInMonth = new Date(calYear, calMonthIdx, 0).getDate();
@@ -232,14 +239,6 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
   };
   const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
   const DOW = ['일', '월', '화', '수', '목', '금', '토'];
-
-  const handleDateClick = (dateStr, dim) => {
-    if (dim) {
-      // 이전/다음달 날짜 클릭 시 해당 월로 이동
-      setProgressCalMonth(dateStr.slice(0, 7));
-    }
-    setSelectedDate(dateStr);
-  };
 
   const renderCell = (dateStr, day, colIdx, extra = {}) => {
     const dayPlans = plansByDate[dateStr] || [];
@@ -1466,6 +1465,7 @@ export default function App() {
                   attendance={attendance}
                   students={students}
                   makeupDates={makeupDates}
+                  onDateSelect={(date) => setCurrentDate(date)}
                 />
               </div>
               <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-left shadow-sm">
