@@ -2041,7 +2041,10 @@ export default function App() {
 
               {/* 진도 달력 */}
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
+                  <span className="text-[9px] font-bold text-slate-300">날짜를 클릭해 기간을 설정하세요 (첫 클릭 → 시작, 두 번째 클릭 → 종료)</span>
+                </div>
                 <ProgressMiniCalendar
                   progressPlans={progressPlans}
                   progressCalMonth={progressCalMonth}
@@ -2050,6 +2053,17 @@ export default function App() {
                   attendance={attendance}
                   students={students}
                   makeupDates={makeupDates}
+                  onDateSelect={(date) => {
+                    setReportRange(prev => {
+                      // 시작 날짜가 없거나 둘 다 있으면 → 시작 날짜 새로 설정
+                      if (!prev.from || (prev.from && prev.to)) {
+                        return { from: date, to: '' };
+                      }
+                      // 시작 날짜만 있으면 → 종료 날짜 설정 (시작보다 앞이면 교체)
+                      if (date < prev.from) return { from: date, to: prev.from };
+                      return { from: prev.from, to: date };
+                    });
+                  }}
                 />
               </div>
 
