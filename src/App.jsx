@@ -160,9 +160,38 @@ const calculateRoundProgress = (students, items, submissionData, statusOrder, la
     if (effectiveTotal <= 0) { acc[s.id] = { label: "제외됨", percent: "100.0" }; return acc; }
 
     const actualStages = statusOrder.slice(1).filter(st => st !== 'exempt');
-    let displayLabel = labels ? (labels[actualStages[0]] || "진행 중") : "1회독";
-    let displayPercent = "0.0";
 
+    // 암기용: 현재 최저 회독 기준으로 진척도 계산
+    // 예) 1회독1개, 2회독1개, 3회독1개 → "1회독 33%" (아직 1회독 못한 게 있으면 1회독 기준)
+    // 모두 1회독 이상이면 "2회독 X%" 방식
+    if (!labels) {
+      // 각 단계별 도달 수 계산
+      for (let i = 0; i < actualStages.length; i++) {
+        const stage = actualStages[i];
+        const countReached = rel.filter(item => {
+          const status = submissionData[`${s.id}-${item.id}`]?.status || 'not_started';
+          if (status === 'exempt') return false;
+          return statusOrder.indexOf(status) >= statusOrder.indexOf(stage);
+        }).length;
+        const pct = ((countReached / effectiveTotal) * 100).toFixed(1);
+        // 이 단계가 100% 미만이면 현재 진행 중인 단계
+        if (pct !== "100.0") {
+          acc[s.id] = { label: `${i + 1}회독`, percent: pct };
+          return acc;
+        }
+        // 마지막 단계까지 100%면 완료
+        if (i === actualStages.length - 1) {
+          acc[s.id] = { label: `${actualStages.length}회독`, percent: "100.0" };
+          return acc;
+        }
+      }
+      acc[s.id] = { label: "1회독", percent: "0.0" };
+      return acc;
+    }
+
+    // 과제용: 기존 로직 유지
+    let displayLabel = labels[actualStages[0]] || "진행 중";
+    let displayPercent = "0.0";
     for (let i = 0; i < actualStages.length; i++) {
       const currentStageKey = actualStages[i];
       const countReached = rel.filter(item => {
@@ -170,11 +199,9 @@ const calculateRoundProgress = (students, items, submissionData, statusOrder, la
         if (status === 'exempt') return false;
         return statusOrder.indexOf(status) >= statusOrder.indexOf(currentStageKey);
       }).length;
-
       const percent = ((countReached / effectiveTotal) * 100).toFixed(1);
-      displayLabel = labels ? (labels[currentStageKey] || "진행 중") : `${i + 1}회독`;
+      displayLabel = labels[currentStageKey] || "진행 중";
       displayPercent = percent;
-
       if (percent !== "100.0") break;
       if (i < actualStages.length - 1) continue;
     }
@@ -474,6 +501,7 @@ export default function App() {
   const [makeupDates, setMakeupDates] = useState({});
   const [studentNotes, setStudentNotes] = useState({});
   const [studentScoreData, setStudentScoreData] = useState({});
+  const [subjects, setSubjects] = useState(['물리', '화학', '생명과학', '지구과학', '통합과학']);
   const [progressPlans, setProgressPlans] = useState([]);
   const [progressCalMonth, setProgressCalMonth] = useState(() => {
     const k = new Date(Date.now() + 9*60*60*1000);
@@ -686,7 +714,7 @@ export default function App() {
       const totalP = jinDoRanged.length;
       const doneP = jinDoRanged.filter(p => p.done).length;
       lines.push(`  전체 진도율 (진도 수업 기준): ${totalP > 0 ? Math.round(doneP/totalP*100) : 0}%  (${doneP}/${totalP} 완료)`);
-      SUBJECTS.forEach(sub => {
+      subjects.forEach(sub => {
         const subPlans = jinDoRanged.filter(p => p.subject === sub);
         if (subPlans.length === 0) return;
         const subDone = subPlans.filter(p => p.done).length;
@@ -887,7 +915,7 @@ export default function App() {
           setUser(u);
           if (u) {
             const basePath = ['artifacts', appId, 'public', 'data'];
-            unsubscribers.push(onSnapshot(doc(db, ...basePath, 'settings', 'config'), snap => { if (snap.exists()) { setSiteTitle(snap.data().siteTitle || 'Science Academy'); if (snap.data().siteColor) setSiteColor(snap.data().siteColor); } }));
+            unsubscribers.push(onSnapshot(doc(db, ...basePath, 'settings', 'config'), snap => { if (snap.exists()) { setSiteTitle(snap.data().siteTitle || 'Science Academy'); if (snap.data().siteColor) setSiteColor(snap.data().siteColor); if (snap.data().subjects) setSubjects(snap.data().subjects); } }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'students')), s => setStudents(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name, 'ko')))));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'assignments')), s => setAssignments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)))));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'memoItems')), s => setMemoItems(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)))));
@@ -1325,7 +1353,7 @@ export default function App() {
                       : filteredItems;
 
                     // 과목별 그룹핑 (visibleItems 기준)
-                    const subjectGroups = SUBJECTS.map(sub => ({
+                    const subjectGroups = subjects.map(sub => ({
                       subject: sub,
                       items: visibleItems.filter(a => a.subject === sub)
                     })).filter(g => g.items.length > 0);
@@ -1782,7 +1810,7 @@ export default function App() {
             const totalPlans = jinDoPlans.length;
             const donePlans = jinDoPlans.filter(p => p.done).length;
             const overallPct = totalPlans > 0 ? Math.round((donePlans / totalPlans) * 100) : 0;
-            const subjectStats = SUBJECTS.reduce((acc, sub) => {
+            const subjectStats = subjects.reduce((acc, sub) => {
               const all = jinDoPlans.filter(p => p.subject === sub);
               const done = all.filter(p => p.done).length;
               if (all.length > 0) acc[sub] = { total: all.length, done };
@@ -2025,7 +2053,7 @@ export default function App() {
             const donePlans = jinDoPlans.filter(p => p.done).length;
             const overallPct = totalPlans > 0 ? Math.round((donePlans / totalPlans) * 100) : 0;
 
-            const subjectStats = SUBJECTS.reduce((acc, sub) => {
+            const subjectStats = subjects.reduce((acc, sub) => {
               const all = jinDoPlans.filter(p => p.subject === sub);
               const done = all.filter(p => p.done).length;
               if (all.length > 0) acc[sub] = { total: all.length, done };
@@ -2212,7 +2240,7 @@ export default function App() {
                       {/* 과목 선택 */}
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">과목</p>
                       <div className="flex flex-wrap gap-1.5 mb-3">
-                        {SUBJECTS.map(sub => (
+                        {subjects.map(sub => (
                           <button key={sub} onClick={() => setNewPlan({ ...newPlan, subject: sub })}
                             className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border-2 transition-all ${newPlan.subject === sub ? 'bg-teal-600 border-teal-600 text-white shadow-sm' : 'border-slate-200 text-slate-400 bg-white hover:border-slate-300'}`}>{sub}</button>
                         ))}
@@ -2244,7 +2272,7 @@ export default function App() {
                                 ))}
                               </div>
                               <div className="flex flex-wrap gap-1.5">
-                                {SUBJECTS.map(sub => (
+                                {subjects.map(sub => (
                                   <button key={sub} onClick={() => setEditPlanData({ ...editPlanData, subject: sub })}
                                     className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border-2 transition-all ${editPlanData.subject === sub ? 'bg-teal-600 border-teal-600 text-white' : 'border-slate-200 text-slate-400 bg-white hover:border-slate-300'}`}>{sub}</button>
                                 ))}
@@ -3301,6 +3329,50 @@ export default function App() {
 
                     {activeTab === 'assignments' && userRole !== 'student' && (
             <div className="max-w-4xl mx-auto space-y-6 text-left">
+              {/* 과목 설정 - master 전용 */}
+              {userRole === 'master' && (() => {
+                const [editingSubjects, setEditingSubjects] = React.useState(false);
+                const [subjectInput, setSubjectInput] = React.useState('');
+                const saveSubjects = async (newList) => {
+                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { subjects: newList }, { merge: true });
+                };
+                return (
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-base font-black text-slate-800 flex items-center gap-2"><Tag size={16} className="text-indigo-500"/> 과목 설정</h2>
+                      <button onClick={() => setEditingSubjects(v => !v)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-all ${editingSubjects ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'}`}>
+                        {editingSubjects ? '완료' : '편집'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {subjects.map((sub, i) => (
+                        <div key={sub} className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-black border ${editingSubjects ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                          {sub}
+                          {editingSubjects && (
+                            <button onClick={() => { const nl = subjects.filter((_,j) => j !== i); saveSubjects(nl); }}
+                              className="ml-1 text-indigo-300 hover:text-red-500 transition-colors font-black leading-none">×</button>
+                          )}
+                        </div>
+                      ))}
+                      {editingSubjects && (
+                        <div className="flex items-center gap-1">
+                          <input
+                            value={subjectInput}
+                            onChange={e => setSubjectInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && subjectInput.trim() && !subjects.includes(subjectInput.trim())) { saveSubjects([...subjects, subjectInput.trim()]); setSubjectInput(''); }}}
+                            placeholder="과목 추가..."
+                            className="px-3 py-1.5 rounded-xl text-sm font-bold border border-indigo-200 bg-white outline-none focus:border-indigo-400 w-28 text-slate-700"
+                          />
+                          <button onClick={() => { if (subjectInput.trim() && !subjects.includes(subjectInput.trim())) { saveSubjects([...subjects, subjectInput.trim()]); setSubjectInput(''); }}}
+                            className="px-2.5 py-1.5 rounded-xl bg-indigo-500 text-white text-xs font-black">+</button>
+                        </div>
+                      )}
+                    </div>
+                    {editingSubjects && <p className="text-[10px] text-slate-400 font-medium mt-3">Enter 또는 + 버튼으로 추가 · × 로 삭제</p>}
+                  </div>
+                );
+              })()}
               {userRole === 'master' && (
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm text-left leading-none">
                   <div className="flex justify-between items-center mb-8 text-left leading-none">
@@ -3312,7 +3384,7 @@ export default function App() {
                   </div>
                   <div className="space-y-8 text-left text-slate-700">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-                      <div className="text-left leading-none"><p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><Tag size={12} /> 1. 과목</p><div className="flex flex-wrap gap-2">{SUBJECTS.map(sub => (<button key={sub} onClick={() => setNewAssignment({ ...newAssignment, subject: sub })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition leading-none ${newAssignment.subject === sub ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}>{sub}</button>))}</div></div>
+                      <div className="text-left leading-none"><p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><Tag size={12} /> 1. 과목</p><div className="flex flex-wrap gap-2">{subjects.map(sub => (<button key={sub} onClick={() => setNewAssignment({ ...newAssignment, subject: sub })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition leading-none ${newAssignment.subject === sub ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}>{sub}</button>))}</div></div>
                       <div className="text-left leading-none"><p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><TrendingUp size={12} /> 2. 수준</p><div className="flex flex-wrap gap-2">{ASSIGNMENT_LEVELS.map(lvl => (<button key={lvl} onClick={() => setNewAssignment({ ...newAssignment, level: lvl })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition leading-none ${newAssignment.level === lvl ? 'bg-indigo-700 border-indigo-700 text-white shadow-md' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}>{lvl}</button>))}</div></div>
                       <div className="text-left leading-none">
                         <p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><UserCheck size={12} /> 3. 대상</p>
@@ -3349,7 +3421,7 @@ export default function App() {
                           <div className="space-y-2 text-left">
                             <p className="text-[10px] uppercase font-black tracking-tighter text-slate-400">과목 수정</p>
                             <div className="flex flex-wrap gap-1">
-                              {SUBJECTS.map(s => (
+                              {subjects.map(s => (
                                 <button key={s} onClick={() => setEditItemData({ ...editItemData, subject: s })} className={`px-2 py-1 rounded-lg text-[9px] font-bold border transition-all ${editItemData.subject === s ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-slate-50 text-slate-400 hover:border-slate-300'}`}>{s}</button>
                               ))}
                             </div>
