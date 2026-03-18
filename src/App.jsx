@@ -1722,9 +1722,15 @@ export default function App() {
           {activeTab === 'attendance' && userRole === 'student' && (() => {
             const s = students.find(st => st.id === myStudentId);
             if (!s) return null;
+
+            // 진도 수업이 있는 날짜 목록
+            const lessonDates = new Set(progressPlans.map(p => p.date));
+
+            // 진도 수업 날짜에만 출결 표시
             const allDates = Object.keys(attendance)
               .filter(k => k.startsWith(`${s.id}-`))
               .map(k => k.replace(`${s.id}-`, ''))
+              .filter(date => lessonDates.has(date))
               .sort((a, b) => b.localeCompare(a));
             const STATUS_LABEL = {
               present: { l: '출석', c: 'emerald' },
