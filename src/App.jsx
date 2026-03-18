@@ -506,7 +506,7 @@ export default function App() {
   const [statusMenu, setStatusMenu] = useState(null);
 
   const [editStudentId, setEditStudentId] = useState(null);
-  const [editStudentData, setEditStudentData] = useState({ name: '', studentCode: '', homeroomTeacher: '', highSchool: '' });
+  const [editStudentData, setEditStudentData] = useState({ name: '', studentCode: '', homeroomTeacher: '', highSchool: '', group: '' });
   const [editItemId, setEditItemId] = useState(null);
   const [editItemData, setEditItemData] = useState(null);
 
@@ -1303,6 +1303,9 @@ export default function App() {
                               <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white z-20 border-r flex flex-col items-start gap-1 justify-center text-left">
                                 <div className="flex items-center justify-between w-full">
                                   <span className="truncate text-base font-black">{s.name}</span>
+                                  {userRole !== 'student' && s.group && (
+                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-lg bg-amber-100 text-amber-700 border border-amber-200 shrink-0">{s.group}</span>
+                                  )}
                                   <button onClick={() => setSelectedStudent(s)}><Search size={14} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
                                 </div>
                                 {(userRole === 'master' || userRole === 'teacher') && (
@@ -1745,12 +1748,30 @@ export default function App() {
                           <div className="space-y-1 text-left leading-none"><label className="text-[10px] text-slate-400 font-black leading-none">담임</label><input value={editStudentData.homeroomTeacher} onChange={(e) => setEditStudentData({ ...editStudentData, homeroomTeacher: e.target.value })} className="w-full px-3 py-2 border rounded-xl font-bold text-sm bg-slate-50 text-slate-800 outline-none shadow-sm focus:border-indigo-500 leading-none" /></div>
                           <div className="space-y-1 text-left leading-none"><label className="text-[10px] text-slate-400 font-black leading-none">고교</label><input value={editStudentData.highSchool} onChange={(e) => setEditStudentData({ ...editStudentData, highSchool: e.target.value })} className="w-full px-3 py-2 border rounded-xl font-bold text-sm bg-slate-50 text-slate-800 outline-none shadow-sm focus:border-indigo-500 leading-none" /></div>
                         </div>
+                        {/* 그룹 선택 - master/teacher 전용, 절대 student에게 노출 금지 */}
+                        <div className="space-y-2 p-3 bg-amber-50 border border-amber-200 rounded-2xl">
+                          <label className="text-[10px] font-black text-amber-700 flex items-center gap-1"><ShieldCheck size={11}/> 내부 수준 그룹 (학생·학부모 비공개)</label>
+                          <div className="flex gap-2">
+                            {['A', 'B', 'C', 'D', 'E', '미분류'].map(g => (
+                              <button key={g} onClick={() => setEditStudentData({ ...editStudentData, group: g === '미분류' ? '' : g })}
+                                className={`flex-1 py-1.5 rounded-xl text-xs font-black border-2 transition-all ${(editStudentData.group || '') === (g === '미분류' ? '' : g) ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'border-amber-200 text-amber-600 bg-white hover:border-amber-400'}`}>
+                                {g}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <div className="flex gap-2 pt-2 leading-none"><button onClick={saveStudentDetails} className="flex-1 py-2 bg-green-600 text-white rounded-xl font-black text-xs shadow-md transition-all hover:bg-green-700 leading-none">저장</button><button onClick={() => setEditStudentId(null)} className="px-4 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs transition-all leading-none">취소</button></div>
                       </div>
                     ) : (
                       <div className="flex justify-between items-start text-left text-slate-700 font-bold">
                         <div className="space-y-3 flex-1 text-left leading-none">
-                          <div className="flex items-center gap-2 text-left leading-none"><span className="font-bold text-xl text-slate-800 leading-none">#{s.studentCode || '000'} {s.name}</span></div>
+                          <div className="flex items-center gap-2 text-left leading-none">
+                            <span className="font-bold text-xl text-slate-800 leading-none">#{s.studentCode || '000'} {s.name}</span>
+                            {/* 그룹 뱃지 - 절대 student 노출 금지 */}
+                            {userRole !== 'student' && s.group && (
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-100 text-amber-700 border border-amber-200">그룹 {s.group}</span>
+                            )}
+                          </div>
                           <div className="grid grid-cols-2 gap-2 text-slate-500 text-left font-bold leading-none">
                             <div className="flex items-center gap-1.5 text-left leading-none"><UserCog size={14} /><span className="text-xs leading-none">{s.homeroomTeacher || "-"}</span></div>
                             <div className="flex items-center gap-1.5 text-left leading-none"><GraduationCap size={14} /><span className="text-xs leading-none">{s.highSchool || "-"}</span></div>
@@ -1758,7 +1779,7 @@ export default function App() {
                         </div>
                         {userRole === 'master' && (
                           <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 leading-none">
-                            <button onClick={() => { setEditStudentId(s.id); setEditStudentData({ name: s.name, studentCode: s.studentCode || '', homeroomTeacher: s.homeroomTeacher || '', highSchool: s.highSchool || '' }); }} className="p-2 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all shadow-sm leading-none"><Edit2 size={18} /></button>
+                            <button onClick={() => { setEditStudentId(s.id); setEditStudentData({ name: s.name, studentCode: s.studentCode || '', homeroomTeacher: s.homeroomTeacher || '', highSchool: s.highSchool || '', group: s.group || '' }); }} className="p-2 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all shadow-sm leading-none"><Edit2 size={18} /></button>
                             <button onClick={() => deleteItem('students', s.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all shadow-sm leading-none"><Trash2 size={18} /></button>
                           </div>
                         )}
