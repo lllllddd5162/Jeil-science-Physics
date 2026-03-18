@@ -210,7 +210,8 @@ const BufferedTextarea = ({ value, onSave, placeholder, className, disabled = fa
 };
 
 // --- Progress Mini Calendar Component ---
-function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday }) {
+function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday, attendance, students, makeupDates }) {
+  const [selectedDate, setSelectedDate] = useState(null);
   const [calYear, calMonthIdx] = progressCalMonth.split('-').map(Number);
   const firstDay = new Date(calYear, calMonthIdx - 1, 1).getDay();
   const daysInMonth = new Date(calYear, calMonthIdx, 0).getDate();
@@ -230,14 +231,32 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
     setProgressCalMonth(`${y}-${String(m).padStart(2, '0')}`);
   };
   const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+
+  const handleDateClick = (dateStr, dim) => {
+    if (dim) {
+      // 이전/다음달 날짜 클릭 시 해당 월로 이동
+      setProgressCalMonth(dateStr.slice(0, 7));
+    }
+    setSelectedDate(dateStr);
+  };
 
   const renderCell = (dateStr, day, colIdx, extra = {}) => {
     const dayPlans = plansByDate[dateStr] || [];
     const isToday = kstToday === dateStr;
+    const isSelected = selectedDate === dateStr;
     const { dim = false } = extra;
     return (
-      <div key={`cell-${dateStr}-${dim?'dim':''}`} className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all ${dim ? 'bg-slate-50/30' : 'hover:bg-teal-50/30'}`}>
-        <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1 ${isToday ? 'bg-teal-600 text-white' : dim ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300') : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>{day}</div>
+      <div
+        key={`cell-${dateStr}-${dim?'dim':''}`}
+        onClick={() => handleDateClick(dateStr, dim)}
+        className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all cursor-pointer
+          ${isSelected ? 'bg-teal-50 ring-1 ring-inset ring-teal-300' : dim ? 'bg-slate-50/30 hover:bg-slate-100/50' : 'hover:bg-teal-50/40'}`}
+      >
+        <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1
+          ${isSelected ? 'bg-teal-500 text-white' : isToday ? 'bg-teal-600 text-white' : dim ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300') : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>
+          {day}
+        </div>
         {dayPlans.length > 0 && (
           <div className="space-y-0.5">
             {dayPlans.slice(0, 2).map(p => {
@@ -250,6 +269,15 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
       </div>
     );
   };
+
+  // 선택된 날짜 상세 데이터
+  const selectedPlans = selectedDate ? (plansByDate[selectedDate] || []) : [];
+  const selectedAttList = selectedDate && students ? students.map(s => ({
+    s,
+    att: attendance?.[`${s.id}-${selectedDate}`] || { status: 'none', makeup: false },
+    makeupDate: makeupDates?.[`${s.id}-${selectedDate}`] || '',
+  })) : [];
+  const hasData = selectedPlans.length > 0 || selectedAttList.some(x => x.att.status !== 'none');
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -293,6 +321,64 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
           <span key={lt.id} className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${lt.light}`}>{lt.id}</span>
         ))}
       </div>
+
+      {/* 선택 날짜 상세 패널 */}
+      {selectedDate && (
+        <div className="border-t border-slate-100">
+          <div className="px-4 py-3 flex items-center justify-between" style={{background:'var(--sc-faint)'}}>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full" style={{background:'var(--sc)'}}/>
+              <span className="font-black text-sm" style={{color:'var(--sc)'}}>{selectedDate}</span>
+              <span className="text-[11px] font-bold text-slate-400">{DOW[new Date(selectedDate).getDay()]}요일</span>
+            </div>
+            <button onClick={() => setSelectedDate(null)} className="text-slate-400 hover:text-slate-600 transition-colors text-lg font-black leading-none">×</button>
+          </div>
+
+          {!hasData ? (
+            <div className="px-4 py-6 text-center text-slate-400 text-[11px] font-bold">이 날의 수업·출결 기록이 없습니다.</div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {/* 수업 내용 */}
+              {selectedPlans.length > 0 && (
+                <div className="px-4 py-3 space-y-1.5">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><span style={{color:'var(--sc)'}}>●</span> 수업 내용</p>
+                  {selectedPlans.map(p => {
+                    const lt = LESSON_TYPES.find(l => l.id === (p.lessonType || '진도')) || LESSON_TYPES[0];
+                    return (
+                      <div key={p.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl border bg-slate-50 ${p.done ? 'opacity-60' : ''}`}>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${lt.light}`}>{p.lessonType || '진도'}</span>
+                        <span className="text-[10px] font-black text-slate-500 shrink-0">{p.subject}</span>
+                        <span className={`text-[11px] font-black text-slate-700 flex-1 min-w-0 truncate ${p.done ? 'line-through' : ''}`}>{p.unit}</span>
+                        {p.done && <span className="text-[9px] font-black text-teal-500 shrink-0">✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {/* 출결 현황 */}
+              {students && selectedAttList.some(x => x.att.status !== 'none') && (
+                <div className="px-4 py-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1"><span style={{color:'var(--sc)'}}>●</span> 출결 현황</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {selectedAttList.filter(x => x.att.status !== 'none').map(({ s, att, makeupDate }) => {
+                      const sm = { present: { l: '출석', c: 'text-emerald-600 bg-emerald-50 border-emerald-100' }, late: { l: '지각', c: 'text-amber-600 bg-amber-50 border-amber-100' }, absent: { l: '결석', c: 'text-red-500 bg-red-50 border-red-100' } }[att.status] || { l: '-', c: 'text-slate-300 bg-slate-50 border-slate-100' };
+                      return (
+                        <div key={s.id} className={`flex items-center justify-between px-2.5 py-2 rounded-xl border text-[10px] font-black ${sm.c}`}>
+                          <span>{s.name}</span>
+                          <div className="flex items-center gap-1">
+                            <span>{sm.l}</span>
+                            {att.makeup && <span className="text-[8px] bg-purple-100 text-purple-600 px-1 py-0.5 rounded font-black">{makeupDate ? makeupDate.slice(5)+'보충' : '보충'}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1377,6 +1463,9 @@ export default function App() {
                   progressCalMonth={progressCalMonth}
                   setProgressCalMonth={setProgressCalMonth}
                   kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                  attendance={attendance}
+                  students={students}
+                  makeupDates={makeupDates}
                 />
               </div>
               <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-left shadow-sm">
@@ -1938,6 +2027,9 @@ export default function App() {
                   progressCalMonth={progressCalMonth}
                   setProgressCalMonth={setProgressCalMonth}
                   kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                  attendance={attendance}
+                  students={students}
+                  makeupDates={makeupDates}
                 />
               </div>
 
