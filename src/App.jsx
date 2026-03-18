@@ -1631,7 +1631,7 @@ export default function App() {
                         {tests.some(t => t.testType === '미니 테스트') && (
                           <th className="w-2 bg-slate-100 border-x border-slate-200 p-0">
                             <div className="h-full flex items-center justify-center">
-                              <span className="text-[8px] font-black text-slate-400 writing-mode-vertical" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>미니 테스트</span>
+                              <span className="text-[8px] font-black text-slate-400" style={{writingMode:'vertical-rl'}}>미니 테스트</span>
                             </div>
                           </th>
                         )}
@@ -3741,10 +3741,10 @@ export default function App() {
                             <div className="flex items-center gap-2 shrink-0">
                               {score != null ? (
                                 <>
-                                  {grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600">{grade.icon} {grade.label}</span>}
+                                  {userRole !== 'student' && grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600">{grade.icon} {grade.label}</span>}
                                   <div className="text-right">
                                     <p className="text-base font-black leading-none text-slate-800">{score}점</p>
-                                    {diff !== null && (
+                                    {userRole !== 'student' && diff !== null && (
                                       <p className={`text-[9px] font-bold mt-0.5 leading-none ${parseFloat(diff)>0?'text-emerald-500':parseFloat(diff)<0?'text-red-400':'text-slate-400'}`}>
                                         평균 대비 {parseFloat(diff)>0?'+':''}{diff}
                                       </p>
