@@ -1082,7 +1082,13 @@ export default function App() {
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3 items-center bg-white">
-                  <h2 className="text-base font-bold flex items-center gap-2 shrink-0">{activeTab === 'matrix' ? <ClipboardCheck size={18}/> : <BrainCircuit size={18}/>} {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}</h2>
+                  <h2 className="text-base font-bold flex items-center gap-2 shrink-0">
+                    {activeTab === 'matrix' ? <ClipboardCheck size={18}/> : <BrainCircuit size={18}/>}
+                    {userRole === 'student' ? '나의 실시간 학습 현황' : '전체 학습 진척도'}
+                  </h2>
+                  <span className="flex items-center gap-1 text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
+                    <Users size={11}/>{visibleStudentsFiltered.length}명
+                  </span>
                   {userRole !== 'student' && (
                     <div className="ml-auto">
                       <button onClick={() => setMatrixHideDone(v => !v)}
@@ -1095,112 +1101,174 @@ export default function App() {
 
                 {/* ── 모바일: 카드형 뷰 ── */}
                 {isMobile ? (
-                  <div className="divide-y divide-slate-100">
-                    {visibleStudentsFiltered.map(s => {
-                      const items = activeTab === 'matrix' ? assignments : memoItems;
+                  (() => {
+                    // 주차 계산 헬퍼
+                    const getWeekKeyM = (dateStr) => {
+                      if (!dateStr) return 'no-deadline';
+                      const d = new Date(dateStr);
+                      const day = d.getDay();
+                      const mon = new Date(d);
+                      mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+                      return mon.toISOString().slice(0, 10);
+                    };
+                    const getWeekLabelM = (wk) => {
+                      if (wk === 'no-deadline') return '마감일 미정';
+                      const mon = new Date(wk); const sun = new Date(wk); sun.setDate(mon.getDate() + 6);
+                      const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
+                      return `${fmt(mon)} ~ ${fmt(sun)}`;
+                    };
+                    const todayKst = new Date(Date.now() + 9*60*60*1000).toISOString().slice(0, 10);
+                    const thisWeekKeyM = getWeekKeyM(todayKst);
 
-                      // 진척도 계산
-                      let pctText, labelText;
-                      if (activeTab === 'matrix') {
-                        const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
-                        const done = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
-                        const incomplete = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
-                        const effective = done + incomplete;
-                        pctText = effective > 0 ? `${Math.round(done / effective * 100)}%` : '-';
-                        labelText = effective > 0 ? `${done}/${effective} 완료` : '집계 중';
-                      } else {
-                        const progressStat = stats.memo[s.id];
-                        pctText = `${progressStat?.percent || '0.0'}%`;
-                        labelText = progressStat?.label || '-';
-                      }
-                      return (
-                        <div key={s.id} className="p-4">
-                          {/* 학생 헤더 */}
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <p className="text-base font-black text-slate-800">{s.name}</p>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {s.homeroomTeacher && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold border border-indigo-100 leading-none"><UserCircle2 size={9}/> {s.homeroomTeacher}</span>}
-                                {s.highSchool && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded text-[9px] font-bold border border-slate-100 leading-none"><School size={9}/> {s.highSchool}</span>}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className={`text-right px-3 py-1.5 rounded-xl ${activeTab === 'matrix' ? 'bg-indigo-50' : 'bg-purple-50'}`}>
-                                <p className={`text-xs font-black ${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'}`}>{pctText}</p>
-                                <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{labelText}</p>
-                              </div>
-                              <button onClick={() => setSelectedStudent(s)}><Search size={16} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
-                            </div>
-                          </div>
-                          {/* 과제 목록 */}
-                          <div className="space-y-2">
-                            {items.map(as => {
-                              const isTarget = as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id));
-                              const subKey = `${s.id}-${as.id}`;
-                              const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
-                              const status = sub?.status || 'not_started';
-                              const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
-                              const isLate = status === 'completed' && as.deadline && sub?.completionDate > as.deadline;
-                              const today = new Date().toISOString().split('T')[0];
-                              const diff = as.deadline ? Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
-                              const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
-                              const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
+                    // matrix 탭만 주차 그룹핑
+                    const allItemsM = activeTab === 'matrix' ? assignments : memoItems;
+                    const weekGroupsM = activeTab === 'matrix' ? (() => {
+                      const wm = {};
+                      allItemsM.forEach(as => { const wk = getWeekKeyM(as.deadline); if (!wm[wk]) wm[wk] = []; wm[wk].push(as); });
+                      return Object.entries(wm)
+                        .sort(([a],[b]) => a === 'no-deadline' ? 1 : b === 'no-deadline' ? -1 : a.localeCompare(b))
+                        .map(([wk, items]) => ({ wk, label: getWeekLabelM(wk), items, isThisWeek: wk === thisWeekKeyM }));
+                    })() : [];
+                    const isWeekCollapsedM = (wk, isThisWeek) => collapsedWeeks[wk] !== undefined ? collapsedWeeks[wk] : !isThisWeek;
+                    const visibleItemsM = activeTab === 'matrix'
+                      ? weekGroupsM.flatMap(({ wk, items, isThisWeek }) => isWeekCollapsedM(wk, isThisWeek) ? [] : items)
+                      : allItemsM;
 
-                              if (!isTarget) return (
-                                <div key={as.id} className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-50/50 border border-slate-100 opacity-40">
-                                  <span className="text-[11px] font-black text-slate-400 truncate flex-1 mr-2">{as.title}</span>
-                                  <span className="text-[9px] text-slate-300 font-bold whitespace-nowrap">대상 아님</span>
-                                </div>
-                              );
-
-                              const colorClass = activeTab === 'matrix' ? (isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]) : `${cfg?.bg} ${cfg?.color}`;
-                              const Icon = activeTab === 'matrix'
-                                ? (status === 'completed' ? (isLate ? History : CheckCircle2) : status === 'in_progress' ? Clock : status === 'incomplete_red' ? AlertCircle : status === 'exempt' ? MinusCircle : Circle)
-                                : cfg?.icon || Circle;
-
+                    return (
+                      <div>
+                        {/* 주차 탭 */}
+                        {activeTab === 'matrix' && weekGroupsM.length > 0 && (
+                          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-2 items-center bg-slate-50/50">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">주차</span>
+                            {weekGroupsM.map(({ wk, label, isThisWeek, items }) => {
+                              const collapsed = isWeekCollapsedM(wk, isThisWeek);
+                              const incompleteCnt = collapsed ? items.reduce((cnt, as) =>
+                                cnt + visibleStudentsFiltered.filter(s => {
+                                  const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
+                                  return (as.type === 'all' || as.targetStudents?.includes(s.id)) && st === 'incomplete_red';
+                                }).length, 0) : 0;
                               return (
-                                <div
-                                  key={as.id}
-                                  onClick={(e) => { if (userRole === 'master') setStatusMenu({ studentId: s.id, itemId: as.id, category: activeTab === 'matrix' ? 'assignment' : 'memorization', x: e.clientX, y: e.clientY }); }}
-                                  className={`flex items-center justify-between px-3 py-2.5 rounded-2xl border transition-all ${colorClass} ${userRole === 'master' ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
-                                >
-                                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                                    <Icon size={16} className="shrink-0" />
-                                    <div className="min-w-0">
-                                      <p className="text-[11px] font-black truncate leading-tight">{as.title}</p>
-                                      <p className="text-[9px] font-bold opacity-70 leading-none mt-0.5">{as.subject} · {as.level}</p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                                    {activeTab === 'matrix' && as.deadline && diff !== null && diff >= 0 && (
-                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap ${diff === 0 ? 'bg-orange-100 text-orange-600 border-orange-200' : diff <= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/60 text-current border-current/20'}`}>
-                                        {diff === 0 ? '마감!' : `D-${diff}`}
-                                      </span>
-                                    )}
-                                    {isOverdue && (
-                                      <span className="flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap bg-red-100 text-red-600 border-red-200">
-                                        <AlertTriangle size={8} className="shrink-0"/>{overDiff}일 초과
-                                      </span>
-                                    )}
-                                    {activeTab === 'memorization' && status !== 'not_started' && (
-                                      <span className="text-[9px] font-black opacity-80 whitespace-nowrap">{cfg?.label}</span>
-                                    )}
-                                    {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
-                                      inlineDateEditKey === subKey ? (
-                                        <input type="date" value={sub?.completionDate || ''} onChange={(e) => updateCompletionDate(s.id, as.id, e.target.value, activeTab === 'matrix' ? 'assignment' : 'memorization')} onBlur={() => setInlineDateEditKey(null)} className="text-[9px] border-none bg-white/60 rounded px-1 outline-none font-bold w-24" autoFocus onClick={e => e.stopPropagation()} />
-                                      ) : (
-                                        <span onClick={(e) => { e.stopPropagation(); setInlineDateEditKey(subKey); }} className="text-[9px] font-bold opacity-60 hover:opacity-100 cursor-pointer whitespace-nowrap">{sub?.completionDate?.split('-').slice(1).join('/') || '날짜'}</span>
-                                      )
-                                    )}
-                                  </div>
-                                </div>
+                                <button key={wk}
+                                  onClick={() => setCollapsedWeeks(prev => ({ ...prev, [wk]: !isWeekCollapsedM(wk, isThisWeek) }))}
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all ${!collapsed ? 'text-white border-transparent shadow-sm' : 'bg-white border-slate-200 text-slate-500'}`}
+                                  style={!collapsed ? {background:'var(--sc)'} : {}}>
+                                  {isThisWeek && <span className="text-[8px] opacity-70">이번주</span>}
+                                  {label}
+                                  <span className={`text-[9px] px-1 py-0.5 rounded-full font-black ${!collapsed ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>{items.length}</span>
+                                  {incompleteCnt > 0 && <span className="text-[9px] px-1 py-0.5 rounded-full font-black bg-red-100 text-red-500">{incompleteCnt}미완</span>}
+                                </button>
                               );
                             })}
                           </div>
+                        )}
+                        <div className="divide-y divide-slate-100">
+                          {visibleStudentsFiltered.map(s => {
+                            const items = visibleItemsM;
+
+                            // 진척도 계산 (전체 과제 기준)
+                            let pctText, labelText;
+                            if (activeTab === 'matrix') {
+                              const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
+                              const done = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
+                              const incomplete = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
+                              const effective = done + incomplete;
+                              pctText = effective > 0 ? `${Math.round(done / effective * 100)}%` : '-';
+                              labelText = effective > 0 ? `${done}/${effective} 완료` : '집계 중';
+                            } else {
+                              const progressStat = stats.memo[s.id];
+                              pctText = `${progressStat?.percent || '0.0'}%`;
+                              labelText = progressStat?.label || '-';
+                            }
+                            return (
+                              <div key={s.id} className="p-4">
+                                {/* 학생 헤더 */}
+                                <div className="flex items-center justify-between mb-3">
+                                  <div>
+                                    <p className="text-base font-black text-slate-800">{s.name}</p>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {s.homeroomTeacher && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold border border-indigo-100 leading-none"><UserCircle2 size={9}/> {s.homeroomTeacher}</span>}
+                                      {s.highSchool && <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded text-[9px] font-bold border border-slate-100 leading-none"><School size={9}/> {s.highSchool}</span>}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`text-right px-3 py-1.5 rounded-xl ${activeTab === 'matrix' ? 'bg-indigo-50' : 'bg-purple-50'}`}>
+                                      <p className={`text-xs font-black ${activeTab === 'matrix' ? 'text-indigo-700' : 'text-purple-700'}`}>{pctText}</p>
+                                      <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{labelText}</p>
+                                    </div>
+                                    <button onClick={() => setSelectedStudent(s)}><Search size={16} className="text-slate-300 hover:text-indigo-600 transition-colors" /></button>
+                                  </div>
+                                </div>
+                                {/* 과제 목록 */}
+                                <div className="space-y-2">
+                                  {items.map(as => {
+                                    const isTarget = as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id));
+                                    const subKey = `${s.id}-${as.id}`;
+                                    const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
+                                    const status = sub?.status || 'not_started';
+                                    const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
+                                    const isLate = status === 'completed' && as.deadline && sub?.completionDate > as.deadline;
+                                    const today = new Date().toISOString().split('T')[0];
+                                    const diff = as.deadline ? Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
+                                    const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
+                                    const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
+
+                                    if (!isTarget) return (
+                                      <div key={as.id} className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-50/50 border border-slate-100 opacity-40">
+                                        <span className="text-[11px] font-black text-slate-400 truncate flex-1 mr-2">{as.title}</span>
+                                        <span className="text-[9px] text-slate-300 font-bold whitespace-nowrap">대상 아님</span>
+                                      </div>
+                                    );
+
+                                    const colorClass = activeTab === 'matrix' ? (isLate ? STATUS_COLORS.late_completed : STATUS_COLORS[status]) : `${cfg?.bg} ${cfg?.color}`;
+                                    const Icon = activeTab === 'matrix'
+                                      ? (status === 'completed' ? (isLate ? History : CheckCircle2) : status === 'in_progress' ? Clock : status === 'incomplete_red' ? AlertCircle : status === 'exempt' ? MinusCircle : Circle)
+                                      : cfg?.icon || Circle;
+
+                                    return (
+                                      <div key={as.id}
+                                        onClick={(e) => { if (userRole === 'master') setStatusMenu({ studentId: s.id, itemId: as.id, category: activeTab === 'matrix' ? 'assignment' : 'memorization', x: e.clientX, y: e.clientY }); }}
+                                        className={`flex items-center justify-between px-3 py-2.5 rounded-2xl border transition-all ${colorClass} ${userRole === 'master' ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
+                                      >
+                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                          <Icon size={16} className="shrink-0" />
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-black truncate leading-tight">{as.title}</p>
+                                            <p className="text-[9px] font-bold opacity-70 leading-none mt-0.5">{as.subject} · {as.level}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                                          {activeTab === 'matrix' && as.deadline && diff !== null && diff >= 0 && (
+                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap ${diff === 0 ? 'bg-orange-100 text-orange-600 border-orange-200' : diff <= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/60 text-current border-current/20'}`}>
+                                              {diff === 0 ? '마감!' : `D-${diff}`}
+                                            </span>
+                                          )}
+                                          {isOverdue && (
+                                            <span className="flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-lg border leading-none whitespace-nowrap bg-red-100 text-red-600 border-red-200">
+                                              <AlertTriangle size={8} className="shrink-0"/>{overDiff}일 초과
+                                            </span>
+                                          )}
+                                          {activeTab === 'memorization' && status !== 'not_started' && (
+                                            <span className="text-[9px] font-black opacity-80 whitespace-nowrap">{cfg?.label}</span>
+                                          )}
+                                          {userRole === 'master' && ((status === 'completed' && activeTab === 'matrix') || (status === 'round_4' && activeTab === 'memorization')) && (
+                                            inlineDateEditKey === subKey ? (
+                                              <input type="date" value={sub?.completionDate || ''} onChange={(e) => updateCompletionDate(s.id, as.id, e.target.value, activeTab === 'matrix' ? 'assignment' : 'memorization')} onBlur={() => setInlineDateEditKey(null)} className="text-[9px] border-none bg-white/60 rounded px-1 outline-none font-bold w-24" autoFocus onClick={e => e.stopPropagation()} />
+                                            ) : (
+                                              <span onClick={(e) => { e.stopPropagation(); setInlineDateEditKey(subKey); }} className="text-[9px] font-bold opacity-60 hover:opacity-100 cursor-pointer whitespace-nowrap">{sub?.completionDate?.split('-').slice(1).join('/') || '날짜'}</span>
+                                            )
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })()
                 ) : (
                 /* ── 데스크탑: 기존 테이블 뷰 ── */
                 <div className="overflow-x-auto text-slate-700">
@@ -1281,7 +1349,7 @@ export default function App() {
                             const incompleteCnt = collapsed ? items.reduce((cnt, as) =>
                               cnt + visibleStudentsFiltered.filter(s => {
                                 const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
-                                return (as.type === 'all' || as.targetStudents?.includes(s.id)) && ['not_started','in_progress','incomplete_red'].includes(st);
+                                return (as.type === 'all' || as.targetStudents?.includes(s.id)) && st === 'incomplete_red';
                               }).length, 0) : 0;
                             return (
                               <button key={wk}
