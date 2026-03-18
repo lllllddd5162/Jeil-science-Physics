@@ -210,7 +210,7 @@ const BufferedTextarea = ({ value, onSave, placeholder, className, disabled = fa
 };
 
 // --- Progress Mini Calendar Component ---
-function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday, attendance, students, makeupDates, onDateSelect }) {
+function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalMonth, kstToday, attendance, students, makeupDates, onDateSelect, highlightFrom, highlightTo }) {
   const [selectedDate, setSelectedDate] = useState(null);
 
   const handleDateClick = (dateStr, dim) => {
@@ -243,26 +243,31 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
   const renderCell = (dateStr, day, colIdx, extra = {}) => {
     const dayPlans = plansByDate[dateStr] || [];
     const isToday = kstToday === dateStr;
-    const isSelected = selectedDate === dateStr;
+    const isFrom = highlightFrom && dateStr === highlightFrom;
+    const isTo = highlightTo && dateStr === highlightTo;
+    const isInRange = highlightFrom && highlightTo && dateStr > highlightFrom && dateStr < highlightTo;
+    // highlightFrom/To 없으면 내부 selectedDate 사용 (출결/진도 탭)
+    const isSelected = !highlightFrom && selectedDate === dateStr;
     const { dim = false } = extra;
-    const bothTodayAndSelected = isToday && isSelected;
     return (
       <div
         key={`cell-${dateStr}-${dim?'dim':''}`}
         onClick={() => handleDateClick(dateStr, dim)}
         className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all cursor-pointer
-          ${isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : dim ? 'bg-slate-50/30 hover:bg-slate-100/50' : 'hover:bg-slate-50/60'}`}
+          ${isFrom ? 'bg-blue-100' : isTo ? 'bg-blue-900/10' : isInRange ? 'bg-blue-50/60' : isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : dim ? 'bg-slate-50/30 hover:bg-slate-100/50' : 'hover:bg-slate-50/60'}`}
       >
         <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1
-          ${bothTodayAndSelected
-            ? 'bg-blue-500 text-white ring-2 ring-emerald-400 ring-offset-1'
-            : isSelected
-              ? 'bg-blue-500 text-white'
+          ${isFrom
+            ? (isToday ? 'bg-blue-400 text-white ring-2 ring-emerald-400 ring-offset-1' : 'bg-blue-400 text-white')
+            : isTo
+              ? (isToday ? 'bg-blue-800 text-white ring-2 ring-emerald-400 ring-offset-1' : 'bg-blue-800 text-white')
               : isToday
                 ? 'bg-emerald-500 text-white'
-                : dim
-                  ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300')
-                  : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>
+                : isSelected
+                  ? 'bg-blue-500 text-white'
+                  : dim
+                    ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300')
+                    : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>
           {day}
         </div>
         {dayPlans.length > 0 && (
@@ -331,12 +336,29 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
           </div>
           <span className="text-[9px] font-bold text-slate-400">오늘</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
-            <span className="text-white text-[7px] font-black">•</span>
+        {highlightFrom ? (
+          <>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded-full bg-blue-400 flex items-center justify-center">
+                <span className="text-white text-[7px] font-black">●</span>
+              </div>
+              <span className="text-[9px] font-bold text-slate-400">시작</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-4 rounded-full bg-blue-800 flex items-center justify-center">
+                <span className="text-white text-[7px] font-black">●</span>
+              </div>
+              <span className="text-[9px] font-bold text-slate-400">종료</span>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+              <span className="text-white text-[7px] font-black">●</span>
+            </div>
+            <span className="text-[9px] font-bold text-slate-400">선택</span>
           </div>
-          <span className="text-[9px] font-bold text-slate-400">선택</span>
-        </div>
+        )}
         <div className="w-px h-3 bg-slate-200"/>
         {LESSON_TYPES.map(lt => (
           <span key={lt.id} className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${lt.light}`}>{lt.id}</span>
@@ -2097,6 +2119,8 @@ export default function App() {
                   attendance={attendance}
                   students={students}
                   makeupDates={makeupDates}
+                  highlightFrom={reportRange.from}
+                  highlightTo={reportRange.to}
                   onDateSelect={(date) => {
                     setReportRange(prev => {
                       // 시작 날짜 없거나 이미 둘 다 있으면 → 시작 날짜 새로 설정
