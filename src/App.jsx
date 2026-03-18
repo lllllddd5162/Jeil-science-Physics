@@ -215,8 +215,13 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
 
   const handleDateClick = (dateStr, dim) => {
     if (dim) setProgressCalMonth(dateStr.slice(0, 7));
-    setSelectedDate(dateStr);
-    if (onDateSelect) onDateSelect(dateStr);
+    if (onDateSelect) {
+      // 리포트 탭: 외부에서 관리, selectedDate는 highlightFrom 기준
+      onDateSelect(dateStr);
+    } else {
+      // 출결/진도 탭: 내부 selectedDate 토글
+      setSelectedDate(prev => prev === dateStr ? null : dateStr);
+    }
   };
 
   const [calYear, calMonthIdx] = progressCalMonth.split('-').map(Number);
@@ -243,10 +248,10 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
   const renderCell = (dateStr, day, colIdx, extra = {}) => {
     const dayPlans = plansByDate[dateStr] || [];
     const isToday = kstToday === dateStr;
-    const isFrom = highlightFrom && dateStr === highlightFrom;
-    const isTo = highlightTo && dateStr === highlightTo;
-    const isInRange = highlightFrom && highlightTo && dateStr > highlightFrom && dateStr < highlightTo;
-    // highlightFrom/To 없으면 내부 selectedDate 사용 (출결/진도 탭)
+    const isFrom = !!highlightFrom && dateStr === highlightFrom;
+    const isTo = !!highlightTo && dateStr === highlightTo;
+    const isInRange = !!highlightFrom && !!highlightTo && dateStr > highlightFrom && dateStr < highlightTo;
+    // highlightFrom 없으면 내부 selectedDate 사용 (출결/진도 탭)
     const isSelected = !highlightFrom && selectedDate === dateStr;
     const { dim = false } = extra;
     return (
