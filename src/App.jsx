@@ -546,7 +546,7 @@ export default function App() {
   const generateReport = () => {
     const { from, to } = reportRange;
     const fromDate = from || '0000-00-00';
-    const toDate = to || '9999-99-99';
+    const toDate = to && to >= from ? to : from ? from : '9999-99-99';
     const inRange = (date) => !date || (date >= fromDate && date <= toDate);
 
     const lines = [];
@@ -2019,19 +2019,41 @@ export default function App() {
                 <h2 className="text-lg font-bold mb-6 flex items-center gap-2 leading-none" style={{color:'var(--sc)'}}>
                   <Printer size={20} /> 학습 종합 리포트 생성
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                  {/* 시작 날짜 - 밝은 파란색 */}
                   <div className="space-y-1.5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">시작 날짜</p>
-                    <input type="date" value={reportRange.from} onChange={e => setReportRange(r => ({...r, from: e.target.value, to: r.to < e.target.value ? e.target.value : r.to}))}
-                      className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-slate-400 transition-all text-slate-800 shadow-sm" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">시작 날짜</p>
+                    <input type="date" value={reportRange.from}
+                      onChange={e => setReportRange(r => ({...r, from: e.target.value, to: r.to < e.target.value ? '' : r.to}))}
+                      className="w-full px-4 py-3 rounded-2xl border-2 font-bold outline-none transition-all text-blue-700 shadow-sm bg-blue-50 border-blue-200 focus:border-blue-400" />
                   </div>
+                  {/* 종료 날짜 - 어두운 파란색 */}
                   <div className="space-y-1.5">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">종료 날짜</p>
-                    <input type="date" value={reportRange.to} onChange={e => setReportRange(r => ({...r, to: e.target.value}))}
-                      className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-slate-400 transition-all text-slate-800 shadow-sm" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">종료 날짜 <span className="text-slate-300 font-bold normal-case">(미선택 시 시작 날짜 하루만)</span></p>
+                    <input type="date" value={reportRange.to}
+                      min={reportRange.from}
+                      onChange={e => setReportRange(r => ({...r, to: e.target.value}))}
+                      className="w-full px-4 py-3 rounded-2xl border-2 font-bold outline-none transition-all shadow-sm bg-blue-900/5 border-blue-700/30 text-blue-900 focus:border-blue-700" />
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-400 font-medium mb-4 leading-none">※ 날짜를 비워두면 전체 기간 데이터를 포함합니다</p>
+                {/* 선택된 기간 표시 */}
+                <div className="flex items-center gap-2 mb-5 px-1">
+                  {reportRange.from ? (
+                    <div className="flex items-center gap-2 text-[11px] font-black">
+                      <span className="px-2.5 py-1 bg-blue-100 text-blue-600 rounded-lg">{reportRange.from}</span>
+                      {reportRange.to && reportRange.to !== reportRange.from ? (
+                        <>
+                          <span className="text-slate-300">→</span>
+                          <span className="px-2.5 py-1 bg-blue-900/10 text-blue-900 rounded-lg">{reportRange.to}</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 font-medium">하루 데이터</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-slate-300 font-medium">날짜 미선택 시 전체 기간</span>
+                  )}
+                </div>
                 <button onClick={generateReport}
                   className="w-full py-4 text-white rounded-2xl font-black text-base shadow-lg transition-all active:scale-95 leading-none flex items-center justify-center gap-2"
                   style={{background:'var(--sc)'}}>
@@ -2055,11 +2077,13 @@ export default function App() {
                   makeupDates={makeupDates}
                   onDateSelect={(date) => {
                     setReportRange(prev => {
-                      // 시작 날짜가 없거나 둘 다 있으면 → 시작 날짜 새로 설정
+                      // 시작 날짜 없거나 이미 둘 다 있으면 → 시작 날짜 새로 설정
                       if (!prev.from || (prev.from && prev.to)) {
                         return { from: date, to: '' };
                       }
-                      // 시작 날짜만 있으면 → 종료 날짜 설정 (시작보다 앞이면 교체)
+                      // 시작 날짜만 있고 같은 날 클릭 → 그냥 하루치로 유지
+                      if (date === prev.from) return prev;
+                      // 시작보다 앞 날짜면 교체
                       if (date < prev.from) return { from: date, to: prev.from };
                       return { from: prev.from, to: date };
                     });
@@ -2071,7 +2095,7 @@ export default function App() {
               {reportGenerated && (() => {
                 const { from, to } = reportRange;
                 const fromDate = from || '0000-00-00';
-                const toDate = to || '9999-99-99';
+                const toDate = to && to >= from ? to : from ? from : '9999-99-99';
                 const inRange = (date) => !date || (date >= fromDate && date <= toDate);
                 const rangedAssign = assignments.filter(a => inRange(a.deadline));
                 const rangedTests = tests.filter(t => inRange(t.date));
