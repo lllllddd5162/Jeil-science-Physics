@@ -1469,41 +1469,55 @@ export default function App() {
                 />
               </div>
               <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-left shadow-sm">
+                {/* 컬럼 헤더 */}
+                <div className="px-5 py-2.5 hidden md:flex items-center gap-6 bg-slate-50 border-b border-slate-100">
+                  <div className="min-w-[150px]">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">학생명</span>
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">메모 입력</span>
+                  </div>
+                  <div className="pr-1">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">출결 현황</span>
+                  </div>
+                </div>
                 {students.map(s => {
                   const att = attendance[`${s.id}-${currentDate}`] || { status: 'none', makeup: false };
                   const note = attendanceNotes[`${s.id}-${currentDate}`] || '';
                   const mDateValue = makeupDates[`${s.id}-${currentDate}`] || '';
                   return (
-                    <div key={s.id} className="p-5 flex flex-col md:flex-row justify-between items-center gap-6 hover:bg-slate-50 transition-all group">
-                      <div className="flex items-center gap-4 min-w-[150px] font-bold text-lg text-slate-700 leading-none">{s.name}</div>
-                      <div className="flex-1 flex flex-col md:flex-row items-center gap-4 w-full">
+                    <div key={s.id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-50 transition-all group">
+                      {/* 학생명 */}
+                      <div className="min-w-[120px] font-black text-base text-slate-700 leading-none pt-2.5 shrink-0">{s.name}</div>
+
+                      {/* 메모 + 보충일 */}
+                      <div className="flex-1 flex flex-col gap-2 min-w-0">
                         {userRole === 'master' ? (
-                          <div className="relative flex-1 w-full text-left text-slate-700 shadow-sm">
+                          <div className="relative w-full text-slate-700 shadow-sm">
                             <StickyNote className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4" />
-                            <BufferedInput value={note} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendanceNotes', `${s.id}-${currentDate}`), { note: v })} placeholder="메모 입력..." className="w-full pl-11 pr-4 py-3 bg-slate-50 border rounded-2xl text-sm font-medium outline-none focus:bg-white text-left" />
+                            <BufferedInput value={note} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendanceNotes', `${s.id}-${currentDate}`), { note: v })} placeholder="메모 입력..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-2xl text-sm font-medium outline-none focus:bg-white text-left" />
                           </div>
                         ) : (
-                          <div className="flex-1 px-4 text-slate-400 font-medium text-sm text-left italic leading-none">{note || "특이사항 없음"}</div>
+                          note ? <div className="px-4 py-2 bg-slate-50 rounded-2xl text-slate-600 font-medium text-sm italic leading-snug">{note}</div> : null
                         )}
-                        <div className="flex flex-wrap items-center gap-2 leading-none">
-                          {att.makeup && (
-                            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1.5 rounded-xl border border-purple-100 shadow-sm animate-in zoom-in-95">
-                              <span className="text-[10px] font-black text-purple-600 uppercase tracking-tighter">보충일</span>
-                              {userRole === 'master' ? (
-                                <input type="date" value={mDateValue} onChange={(e) => updateMakeupDateValue(s.id, currentDate, e.target.value)} className="text-xs bg-white border-none rounded px-2 py-0.5 outline-none font-bold text-purple-700 select-text shadow-inner" />
-                              ) : (
-                                <span className="text-xs font-bold text-purple-700">{mDateValue || "-"}</span>
-                              )}
-                            </div>
-                          )}
-                          <div className="flex gap-1.5 leading-none">
-                            {/* [FIX 4] absent 버튼 라벨 오타 수정: l 값을 '결석'으로 통일 */}
-                            {[{ id: 'present', l: '출석', c: 'emerald' }, { id: 'late', l: '지각', c: 'amber' }, { id: 'absent', l: '결석', c: 'rose' }].map(opt => (
-                              <button key={opt.id} onClick={() => updateAttendance(s.id, opt.id)} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.status === opt.id ? `bg-${opt.c}-500 border-${opt.c}-500 text-white shadow-lg` : 'bg-white border-slate-100 text-slate-400'}`}>{opt.l}</button>
-                            ))}
-                            <button onClick={() => updateAttendance(s.id, 'makeup')} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.makeup ? 'bg-purple-500 border-purple-500 text-white shadow-lg shadow-purple-100' : 'bg-white border-slate-100 text-slate-400'} ${userRole === 'master' ? 'hover:border-slate-300' : 'cursor-default'}`}>보충</button>
+                        {att.makeup && (
+                          <div className="flex items-center gap-2 bg-purple-50 px-3 py-1.5 rounded-xl border border-purple-100 shadow-sm w-fit">
+                            <span className="text-[10px] font-black text-purple-600 uppercase tracking-tighter">보충일</span>
+                            {userRole === 'master' ? (
+                              <input type="date" value={mDateValue} onChange={(e) => updateMakeupDateValue(s.id, currentDate, e.target.value)} className="text-xs bg-white border-none rounded px-2 py-0.5 outline-none font-bold text-purple-700 select-text shadow-inner" />
+                            ) : (
+                              <span className="text-xs font-bold text-purple-700">{mDateValue || '-'}</span>
+                            )}
                           </div>
-                        </div>
+                        )}
+                      </div>
+
+                      {/* 출결 버튼 */}
+                      <div className="flex gap-1.5 shrink-0 pt-0.5">
+                        {[{ id: 'present', l: '출석', c: 'emerald' }, { id: 'late', l: '지각', c: 'amber' }, { id: 'absent', l: '결석', c: 'rose' }].map(opt => (
+                          <button key={opt.id} onClick={() => updateAttendance(s.id, opt.id)} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.status === opt.id ? `bg-${opt.c}-500 border-${opt.c}-500 text-white shadow-lg` : 'bg-white border-slate-100 text-slate-400'}`}>{opt.l}</button>
+                        ))}
+                        <button onClick={() => updateAttendance(s.id, 'makeup')} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.makeup ? 'bg-purple-500 border-purple-500 text-white shadow-lg shadow-purple-100' : 'bg-white border-slate-100 text-slate-400'} ${userRole === 'master' ? 'hover:border-slate-300' : 'cursor-default'}`}>보충</button>
                       </div>
                     </div>
                   );
