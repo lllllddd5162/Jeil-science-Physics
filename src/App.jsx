@@ -546,7 +546,8 @@ export default function App() {
   const [newTest, setNewTest] = useState({ 
     title: '', source: '', difficulty: '중', description: '', 
     date: new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0], 
-    scales: DEFAULT_GRADE_SCALES 
+    scales: DEFAULT_GRADE_SCALES,
+    testType: '중간 테스트'
   });
 
   // --- Logic Hooks ---
@@ -561,10 +562,13 @@ export default function App() {
     const assign = calculateRoundProgress(students, assignments, submissions, ASSIGN_STATUS_ORDER, ASSIGN_LABELS);
     const memo = calculateRoundProgress(students, memoItems, memoSubmissions, MEMO_STATUS_ORDER, null);
 
+    // 평균은 중간 테스트만
+    const mainTests = tests.filter(t => !t.testType || t.testType === '중간 테스트');
+
     return {
       assign, memo,
       studentTestAverages: students.reduce((acc, s) => {
-        const scs = tests.map(t => testScores[`${s.id}-${t.id}`]?.score).filter(v => v !== null && v !== undefined);
+        const scs = mainTests.map(t => testScores[`${s.id}-${t.id}`]?.score).filter(v => v !== null && v !== undefined);
         acc[s.id] = scs.length ? (scs.reduce((a, b) => a + b, 0) / scs.length).toFixed(1) : "0.0";
         return acc;
       }, {}),
@@ -1581,8 +1585,17 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                     <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1">실시 일자</p><input type="date" value={newTest.date} onChange={(e) => setNewTest({ ...newTest, date: e.target.value })} className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 transition-all text-slate-800 shadow-sm" /></div>
                     <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1 text-left">시험 명칭</p><BufferedInput value={newTest.title} onSave={(v) => setNewTest({ ...newTest, title: v })} placeholder="제목..." className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm" /></div>
-                    <div className="space-y-1 text-left"><p className="text-[10px] uppercase font-black ml-1 text-left">출처</p><BufferedInput value={newTest.source} onSave={(v) => setNewTest({ ...newTest, source: v })} placeholder="출처..." className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm" /></div>
+                    <div className="space-y-1 text-left"><p className="text-[10px] uppercase font-black ml-1 text-left">출처</p><BufferedInput value={newTest.source} onSave={(v) => setNewTest({ ...newTest, source: v })} placeholder="출처..." className="w-full px-4 py-3 rounded-2xl font-bold border bg-slate-50 outline-none shadow-sm" /></div>
                     <div className="space-y-1"><p className="text-[10px] uppercase font-black ml-1 text-left">난이도 및 등록</p><div className="flex gap-2"><select value={newTest.difficulty} onChange={(e) => setNewTest({ ...newTest, difficulty: e.target.value })} className="flex-1 px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm">{DIFFICULTIES.map(d => <option key={d}>{d}</option>)}</select><button onClick={addTest} className="bg-orange-500 text-white px-6 py-3 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all">등록</button></div></div>
+                  </div>
+                  {/* 테스트 종류 선택 */}
+                  <div className="flex gap-2 mb-4">
+                    {['중간 테스트', '미니 테스트'].map(type => (
+                      <button key={type} onClick={() => setNewTest({ ...newTest, testType: type })}
+                        className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all ${newTest.testType === type ? 'bg-orange-500 border-orange-500 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-orange-300'}`}>
+                        {type === '중간 테스트' ? '📝 중간 테스트 (평균 집계)' : '⚡ 미니 테스트 (평균 제외)'}
+                      </button>
+                    ))}
                   </div>
                   <BufferedTextarea value={newTest.description} onSave={(v) => setNewTest({ ...newTest, description: v })} placeholder="상세 범위 및 설명..." className="w-full h-24 p-4 border rounded-2xl font-medium text-sm outline-none bg-slate-50 focus:bg-white transition-all text-slate-700 shadow-inner" />
                 </div>
@@ -1594,23 +1607,31 @@ export default function App() {
                     <thead className="bg-slate-50/50 text-slate-400">
                       <tr>
                         <th className="p-5 font-black text-[10px] sticky left-0 bg-slate-50 z-20 w-40 border-r text-center leading-none">이름</th>
-                        <th className="p-5 font-black text-orange-600 text-[10px] border-r w-24 text-center bg-orange-50/30 leading-none">평균</th>
-                        {tests.map(t => (
-                          <th key={t.id} className="p-5 min-w-[200px] border-b text-left">
-                            <div className="flex flex-col relative group/th text-left">
-                              <div className="flex justify-between items-start mb-1">
-                                <span className="text-[9px] font-black text-orange-500 uppercase">{t.date}</span>
-                                <div className="flex gap-1">
-                                  <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-orange-100 rounded text-orange-400 transition-colors"><Search size={14} /></button>
-                                  {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
+                        <th className="p-5 font-black text-orange-600 text-[10px] border-r w-24 text-center bg-orange-50/30 leading-none">평균<br/><span className="text-[8px] font-bold text-orange-300">(중간 테스트)</span></th>
+                        {tests.map(t => {
+                          const isMini = t.testType === '미니 테스트';
+                          return (
+                            <th key={t.id} className={`p-5 min-w-[200px] border-b text-left ${isMini ? 'bg-slate-50/50' : ''}`}>
+                              <div className="flex flex-col relative group/th text-left">
+                                <div className="flex justify-between items-start mb-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-black text-orange-500 uppercase">{t.date}</span>
+                                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none ${isMini ? 'bg-slate-200 text-slate-500' : 'bg-orange-100 text-orange-600'}`}>
+                                      {isMini ? '미니' : '중간'}
+                                    </span>
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-orange-100 rounded text-orange-400 transition-colors"><Search size={14} /></button>
+                                    {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
+                                  </div>
                                 </div>
+                                <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
+                                {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
+                                {!isMini && <span className="mt-1 text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded w-fit leading-none">AVG: {stats.testAverages[t.id]}점</span>}
                               </div>
-                              <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
-                              {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
-                              <span className="mt-1 text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded w-fit leading-none">AVG: {stats.testAverages[t.id]}점</span>
-                            </div>
-                          </th>
-                        ))}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 text-center">
