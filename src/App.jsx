@@ -245,15 +245,24 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
     const isToday = kstToday === dateStr;
     const isSelected = selectedDate === dateStr;
     const { dim = false } = extra;
+    const bothTodayAndSelected = isToday && isSelected;
     return (
       <div
         key={`cell-${dateStr}-${dim?'dim':''}`}
         onClick={() => handleDateClick(dateStr, dim)}
         className={`border-b border-r border-slate-50 min-h-[60px] p-1.5 transition-all cursor-pointer
-          ${isSelected ? 'bg-teal-50 ring-1 ring-inset ring-teal-300' : dim ? 'bg-slate-50/30 hover:bg-slate-100/50' : 'hover:bg-teal-50/40'}`}
+          ${isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : dim ? 'bg-slate-50/30 hover:bg-slate-100/50' : 'hover:bg-slate-50/60'}`}
       >
         <div className={`text-xs font-black w-5 h-5 flex items-center justify-center rounded-full mb-1
-          ${isSelected ? 'bg-teal-500 text-white' : isToday ? 'bg-teal-600 text-white' : dim ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300') : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>
+          ${bothTodayAndSelected
+            ? 'bg-blue-500 text-white ring-2 ring-emerald-400 ring-offset-1'
+            : isSelected
+              ? 'bg-blue-500 text-white'
+              : isToday
+                ? 'bg-emerald-500 text-white'
+                : dim
+                  ? (colIdx===0?'text-red-200':colIdx===6?'text-blue-200':'text-slate-300')
+                  : colIdx===0?'text-red-400':colIdx===6?'text-blue-400':'text-slate-600'}`}>
           {day}
         </div>
         {dayPlans.length > 0 && (
@@ -315,7 +324,20 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
         })}
       </div>
       {/* 범례 */}
-      <div className="px-4 py-2.5 border-t border-slate-50 flex flex-wrap gap-2">
+      <div className="px-4 py-2.5 border-t border-slate-50 flex flex-wrap gap-3 items-center">
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center">
+            <span className="text-white text-[7px] font-black">18</span>
+          </div>
+          <span className="text-[9px] font-bold text-slate-400">오늘</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+            <span className="text-white text-[7px] font-black">•</span>
+          </div>
+          <span className="text-[9px] font-bold text-slate-400">선택</span>
+        </div>
+        <div className="w-px h-3 bg-slate-200"/>
         {LESSON_TYPES.map(lt => (
           <span key={lt.id} className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${lt.light}`}>{lt.id}</span>
         ))}
