@@ -473,6 +473,7 @@ export default function App() {
   const [attendanceNotes, setAttendanceNotes] = useState({});
   const [makeupDates, setMakeupDates] = useState({});
   const [studentNotes, setStudentNotes] = useState({});
+  const [studentScoreData, setStudentScoreData] = useState({});
   const [progressPlans, setProgressPlans] = useState([]);
   const [progressCalMonth, setProgressCalMonth] = useState(() => {
     const k = new Date(Date.now() + 9*60*60*1000);
@@ -897,6 +898,7 @@ export default function App() {
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'attendanceNotes')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data().note); setAttendanceNotes(d); }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'makeupDates')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data().date); setMakeupDates(d); }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'notes')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data().note); setStudentNotes(d); }));
+            unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'studentScores')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data()); setStudentScoreData(d); }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'progressPlans')), s => setProgressPlans(s.docs.map(d => ({ id: d.id, ...d.data() })))));
 
             // [FIX 3] notes 콜백 의존 제거: 인증 완료 후 바로 로딩 해제
@@ -1776,6 +1778,86 @@ export default function App() {
                             <div className="flex items-center gap-1.5 text-left leading-none"><UserCog size={14} /><span className="text-xs leading-none">{s.homeroomTeacher || "-"}</span></div>
                             <div className="flex items-center gap-1.5 text-left leading-none"><GraduationCap size={14} /><span className="text-xs leading-none">{s.highSchool || "-"}</span></div>
                           </div>
+                          {/* 전점수/등급 - 절대 student 노출 금지 */}
+                          {userRole !== 'student' && (() => {
+                            const sd = studentScoreData[s.id] || {};
+                            return (
+                              <div className="mt-2 p-3 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
+                                <p className="text-[9px] font-black text-rose-700 flex items-center gap-1"><ShieldCheck size={10}/> 전점수 · 등급 (학생·학부모 비공개)</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {/* 전점수 */}
+                                  <div className="space-y-1">
+                                    <p className="text-[9px] font-black text-rose-500">전점수</p>
+                                    {userRole === 'master' ? (
+                                      <BufferedInput
+                                        type="number"
+                                        value={sd.prevScore ?? ''}
+                                        onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { prevScore: v === '' ? null : parseFloat(v) }, { merge: true })}
+                                        placeholder="점수 입력..."
+                                        className="w-full px-2 py-1.5 rounded-xl border border-rose-200 bg-white font-bold text-sm outline-none focus:border-rose-400 text-slate-800 shadow-sm"
+                                      />
+                                    ) : (
+                                      <p className="text-sm font-black text-slate-700">{sd.prevScore != null ? `${sd.prevScore}점` : '-'}</p>
+                                    )}
+                                  </div>
+                                  {/* 개정 선택 */}
+                                  <div className="space-y-1">
+                                    <p className="text-[9px] font-black text-rose-500">교육과정</p>
+                                    {userRole === 'master' ? (
+                                      <div className="flex gap-1">
+                                        {['15개정', '22개정'].map(cur => (
+                                          <button key={cur} onClick={() => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { curriculum: cur, grade: '' }, { merge: true })}
+                                            className={`flex-1 py-1.5 rounded-xl text-[10px] font-black border transition-all ${(sd.curriculum || '') === cur ? 'bg-rose-500 border-rose-500 text-white' : 'border-rose-200 text-rose-400 bg-white hover:border-rose-400'}`}>
+                                            {cur}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm font-black text-slate-700">{sd.curriculum || '-'}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* 등급 - 개정에 따라 다르게 */}
+                                <div className="space-y-1">
+                                  <p className="text-[9px] font-black text-rose-500">등급</p>
+                                  {userRole === 'master' ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {(sd.curriculum === '22개정'
+                                        ? ['1등급','2등급','3등급','4등급','5등급']
+                                        : ['1등급','2등급','3등급','4등급','5등급','6등급','7등급','8등급','9등급']
+                                      ).map(g => (
+                                        <button key={g} onClick={() => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { grade: sd.grade === g ? '' : g }, { merge: true })}
+                                          className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-all ${sd.grade === g ? 'bg-rose-500 border-rose-500 text-white shadow-sm' : 'border-rose-200 text-rose-400 bg-white hover:border-rose-400'}`}>
+                                          {g}
+                                        </button>
+                                      ))}
+                                      {!sd.curriculum && <p className="text-[10px] text-rose-300 font-bold italic">교육과정 먼저 선택하세요</p>}
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      {sd.grade && <span className="px-2 py-1 rounded-lg text-xs font-black bg-rose-100 text-rose-700 border border-rose-200">{sd.grade}</span>}
+                                      {sd.curriculum && <span className="text-[10px] text-slate-400 font-bold">{sd.curriculum}</span>}
+                                      {!sd.grade && <span className="text-sm font-black text-slate-400">-</span>}
+                                    </div>
+                                  )}
+                                </div>
+                                {/* 메모 */}
+                                <div className="space-y-1">
+                                  <p className="text-[9px] font-black text-rose-500">성적 메모</p>
+                                  {userRole === 'master' ? (
+                                    <BufferedTextarea
+                                      value={sd.scoreMemo || ''}
+                                      onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { scoreMemo: v }, { merge: true })}
+                                      placeholder="성적 관련 메모..."
+                                      className="w-full px-2 py-1.5 rounded-xl border border-rose-200 bg-white font-medium text-xs outline-none focus:border-rose-400 text-slate-700 resize-none h-14 shadow-sm"
+                                    />
+                                  ) : (
+                                    sd.scoreMemo ? <p className="text-xs text-slate-600 font-medium italic">{sd.scoreMemo}</p> : null
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                         {userRole === 'master' && (
                           <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 leading-none">
