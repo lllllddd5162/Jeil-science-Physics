@@ -1451,7 +1451,6 @@ export default function App() {
                 <div className="flex items-center gap-2 text-emerald-600"><Calendar size={20} /> 출결 및 보충 현황 관리</div>
                 <div className="flex items-center gap-3 w-full md:w-auto leading-none">
                   <input type="date" value={currentDate} onChange={(e) => setCurrentDate(e.target.value)} className="flex-1 md:flex-none px-6 py-3 rounded-2xl border font-bold outline-none shadow-sm focus:border-indigo-500 transition-all text-slate-700" />
-                  {userRole === 'master' && <button onClick={handleBulkAttendanceToggle} className="flex items-center gap-2 bg-emerald-500 text-white px-5 py-3 rounded-2xl font-black shadow-lg hover:bg-emerald-600 transition active:scale-95 whitespace-nowrap shadow-md leading-none"><CheckCircle size={18} /> 일괄 출석</button>}
                 </div>
               </div>
               {/* 진도 달력 미니 뷰 */}
@@ -1469,16 +1468,23 @@ export default function App() {
                 />
               </div>
               <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-left shadow-sm">
-                {/* 컬럼 헤더 */}
-                <div className="px-5 py-2.5 hidden md:flex items-center gap-6 bg-slate-50 border-b border-slate-100">
-                  <div className="min-w-[150px]">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">학생명</span>
+                {/* 컬럼 헤더 + 일괄 출석 */}
+                <div className="px-5 py-3 flex items-center gap-4 bg-slate-50 border-b border-slate-100">
+                  <div className="hidden md:flex items-center gap-6 flex-1">
+                    <div className="min-w-[120px]">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">학생명</span>
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">메모 입력</span>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">메모 입력</span>
-                  </div>
-                  <div className="pr-1">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">출결 현황</span>
+                  <div className="flex items-center gap-3 ml-auto">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest hidden md:block">출결 현황</span>
+                    {userRole === 'master' && (
+                      <button onClick={handleBulkAttendanceToggle} className="flex items-center gap-1.5 bg-emerald-500 text-white px-4 py-2 rounded-xl font-black text-xs shadow-md hover:bg-emerald-600 transition active:scale-95 whitespace-nowrap leading-none">
+                        <CheckCircle size={14}/> 일괄 출석
+                      </button>
+                    )}
                   </div>
                 </div>
                 {students.map(s => {
