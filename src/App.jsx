@@ -1607,31 +1607,53 @@ export default function App() {
                     <thead className="bg-slate-50/50 text-slate-400">
                       <tr>
                         <th className="p-5 font-black text-[10px] sticky left-0 bg-slate-50 z-20 w-40 border-r text-center leading-none">이름</th>
-                        <th className="p-5 font-black text-orange-600 text-[10px] border-r w-24 text-center bg-orange-50/30 leading-none">평균<br/><span className="text-[8px] font-bold text-orange-300">(중간 테스트)</span></th>
-                        {tests.map(t => {
-                          const isMini = t.testType === '미니 테스트';
-                          return (
-                            <th key={t.id} className={`p-5 min-w-[200px] border-b text-left ${isMini ? 'bg-slate-50/50' : ''}`}>
-                              <div className="flex flex-col relative group/th text-left">
-                                <div className="flex justify-between items-start mb-1">
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[9px] font-black text-orange-500 uppercase">{t.date}</span>
-                                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none ${isMini ? 'bg-slate-200 text-slate-500' : 'bg-orange-100 text-orange-600'}`}>
-                                      {isMini ? '미니' : '중간'}
-                                    </span>
-                                  </div>
-                                  <div className="flex gap-1">
-                                    <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-orange-100 rounded text-orange-400 transition-colors"><Search size={14} /></button>
-                                    {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
-                                  </div>
+                        {/* 중간 테스트 헤더 */}
+                        {tests.filter(t => !t.testType || t.testType === '중간 테스트').map(t => (
+                          <th key={t.id} className="p-5 min-w-[200px] border-b text-left">
+                            <div className="flex flex-col relative group/th text-left">
+                              <div className="flex justify-between items-start mb-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] font-black text-orange-500 uppercase">{t.date}</span>
+                                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none bg-orange-100 text-orange-600">중간</span>
                                 </div>
-                                <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
-                                {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
-                                {!isMini && <span className="mt-1 text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded w-fit leading-none">AVG: {stats.testAverages[t.id]}점</span>}
+                                <div className="flex gap-1">
+                                  <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-orange-100 rounded text-orange-400 transition-colors"><Search size={14} /></button>
+                                  {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
+                                </div>
                               </div>
-                            </th>
-                          );
-                        })}
+                              <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
+                              {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
+                              <span className="mt-1 text-[10px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded w-fit leading-none">AVG: {stats.testAverages[t.id]}점</span>
+                            </div>
+                          </th>
+                        ))}
+                        {/* 중간/미니 구분선 */}
+                        {tests.some(t => t.testType === '미니 테스트') && (
+                          <th className="w-2 bg-slate-100 border-x border-slate-200 p-0">
+                            <div className="h-full flex items-center justify-center">
+                              <span className="text-[8px] font-black text-slate-400 writing-mode-vertical" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>미니 테스트</span>
+                            </div>
+                          </th>
+                        )}
+                        {/* 미니 테스트 헤더 */}
+                        {tests.filter(t => t.testType === '미니 테스트').map(t => (
+                          <th key={t.id} className="p-5 min-w-[180px] border-b text-left bg-slate-50/50">
+                            <div className="flex flex-col relative group/th text-left">
+                              <div className="flex justify-between items-start mb-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase">{t.date}</span>
+                                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none bg-slate-200 text-slate-500">미니</span>
+                                </div>
+                                <div className="flex gap-1">
+                                  <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-slate-100 rounded text-slate-400 transition-colors"><Search size={14} /></button>
+                                  {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200 transition-colors"><Trash2 size={14} /></button>}
+                                </div>
+                              </div>
+                              <span className="text-xs font-bold text-slate-600 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
+                              {t.source && <div className="mt-1 flex items-center gap-1 text-indigo-400 bg-white border border-indigo-50 px-1.5 py-0.5 rounded w-fit text-[9px] font-black leading-none shadow-sm"><Bookmark size={10} />{t.source}</div>}
+                            </div>
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 text-center">
@@ -1645,25 +1667,43 @@ export default function App() {
                               </button>
                             </div>
                           </td>
-                          <td className="p-5 text-center border-r font-black text-orange-600 bg-orange-50/10 leading-none">{stats.studentTestAverages[s.id]}</td>
-                          {tests.map(t => {
+                          {/* 중간 테스트 셀들 */}
+                          {tests.filter(t => !t.testType || t.testType === '중간 테스트').map(t => {
                             const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '' };
                             const score = res.score;
-                            const grade = (score !== '' && score != null) && t.scales
-                              ? [...t.scales].sort((a,b) => b.min - a.min).find(g => parseFloat(score) >= g.min)
-                              : null;
                             return (
                               <td key={t.id} className="p-4 text-center">
                                 {userRole === 'master' ? (
                                   <div className="flex flex-col gap-2">
                                     <BufferedInput type="number" value={res.score ?? ''} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { score: v === '' ? null : parseFloat(v) }, { merge: true })} className="w-full px-3 py-1.5 rounded-xl bg-slate-50 font-bold text-center text-sm focus:border-orange-500 shadow-sm transition-all" />
-                                    {grade && <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg">{grade.icon} {grade.label}</span>}
                                     <BufferedTextarea value={res.plan} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { plan: v }, { merge: true })} className="w-full px-3 py-2 rounded-xl bg-slate-50 border-none text-[10px] h-12 resize-none font-medium shadow-inner text-center" />
                                   </div>
                                 ) : (
                                   <div className="space-y-1 text-center">
                                     <div className="w-full py-1.5 bg-slate-50 rounded-xl font-black text-slate-700 text-sm text-center shadow-sm">{score !== '' && score != null ? `${score}점` : '-'}</div>
-                                    {grade && <div className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg">{grade.icon} {grade.label}</div>}
+                                    {res.plan && <div className="text-[10px] bg-indigo-50/50 p-2 rounded-xl text-indigo-700 font-medium whitespace-pre-wrap text-center leading-tight shadow-inner">{res.plan}</div>}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          {/* 미니 테스트 구분선 + 셀들 */}
+                          {tests.some(t => t.testType === '미니 테스트') && (
+                            <td className="w-2 bg-slate-100 border-x border-slate-200 p-0"/>
+                          )}
+                          {tests.filter(t => t.testType === '미니 테스트').map(t => {
+                            const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '' };
+                            const score = res.score;
+                            return (
+                              <td key={t.id} className="p-4 text-center bg-slate-50/30">
+                                {userRole === 'master' ? (
+                                  <div className="flex flex-col gap-2">
+                                    <BufferedInput type="number" value={res.score ?? ''} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { score: v === '' ? null : parseFloat(v) }, { merge: true })} className="w-full px-3 py-1.5 rounded-xl bg-white font-bold text-center text-sm focus:border-slate-400 shadow-sm transition-all" />
+                                    <BufferedTextarea value={res.plan} onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${s.id}-${t.id}`), { plan: v }, { merge: true })} className="w-full px-3 py-2 rounded-xl bg-white border-none text-[10px] h-12 resize-none font-medium shadow-inner text-center" />
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1 text-center">
+                                    <div className="w-full py-1.5 bg-white rounded-xl font-black text-slate-700 text-sm text-center shadow-sm">{score !== '' && score != null ? `${score}점` : '-'}</div>
                                     {res.plan && <div className="text-[10px] bg-indigo-50/50 p-2 rounded-xl text-indigo-700 font-medium whitespace-pre-wrap text-center leading-tight shadow-inner">{res.plan}</div>}
                                   </div>
                                 )}
