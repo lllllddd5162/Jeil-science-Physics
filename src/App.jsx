@@ -77,7 +77,7 @@ const LESSON_TYPES = [
   { id: '진도',        color: 'bg-indigo-500',  light: 'bg-indigo-50 text-indigo-700 border-indigo-200',  calChip: 'bg-indigo-100 text-indigo-700' },
   { id: '암기',        color: 'bg-purple-500',  light: 'bg-purple-50 text-purple-700 border-purple-200',  calChip: 'bg-purple-100 text-purple-700' },
   { id: '문제풀이',    color: 'bg-orange-500',  light: 'bg-orange-50 text-orange-700 border-orange-200',  calChip: 'bg-orange-100 text-orange-700' },
-  { id: '중간 테스트', color: 'bg-rose-500',    light: 'bg-rose-50 text-rose-700 border-rose-200',        calChip: 'bg-rose-100 text-rose-700' },
+  { id: '중간 테스트', color: 'bg-blue-500',    light: 'bg-blue-50 text-blue-700 border-blue-200',        calChip: 'bg-blue-100 text-blue-700' },
   { id: '시험 직전 대비', color: 'bg-red-600',  light: 'bg-red-50 text-red-700 border-red-200',           calChip: 'bg-red-100 text-red-700' },
 ];
 
@@ -1001,7 +1001,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-1 leading-none text-[9px]">
-                  <span className={`px-2 py-0.5 rounded font-black uppercase border ${userRole === 'master' ? 'bg-rose-500 border-rose-400' : userRole === 'teacher' ? 'bg-amber-500 border-amber-400' : 'bg-emerald-500 border-emerald-400'}`}>
+                  <span className={`px-2 py-0.5 rounded font-black uppercase border ${userRole === 'master' ? 'bg-blue-500 border-blue-400' : userRole === 'teacher' ? 'bg-amber-500 border-amber-400' : 'bg-emerald-500 border-emerald-400'}`}>
                     {userRole}
                   </span>
                   <p className="text-white/50 tracking-widest uppercase ml-1">v17.49 master</p>
@@ -1766,27 +1766,27 @@ export default function App() {
                         {userRole !== 'student' && (() => {
                           const sd = studentScoreData[s.id] || {};
                           return (
-                            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
-                              <p className="text-[9px] font-black text-rose-700 flex items-center gap-1"><ShieldCheck size={10}/> 전점수 · 등급 (학생·학부모 비공개)</p>
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl space-y-2">
+                              <p className="text-[9px] font-black text-blue-700 flex items-center gap-1"><ShieldCheck size={10}/> 전점수 · 등급 (학생·학부모 비공개)</p>
                               <div className="grid grid-cols-2 gap-2">
                                 {/* 전점수 */}
                                 <div className="space-y-1">
-                                  <p className="text-[9px] font-black text-rose-500">전점수</p>
+                                  <p className="text-[9px] font-black text-blue-500">전점수</p>
                                   <BufferedInput
                                     type="number"
                                     value={sd.prevScore ?? ''}
                                     onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { prevScore: v === '' ? null : parseFloat(v) }, { merge: true })}
                                     placeholder="점수 입력..."
-                                    className="w-full px-2 py-1.5 rounded-xl border border-rose-200 bg-white font-bold text-sm outline-none focus:border-rose-400 text-slate-800 shadow-sm"
+                                    className="w-full px-2 py-1.5 rounded-xl border border-blue-200 bg-white font-bold text-sm outline-none focus:border-blue-400 text-slate-800 shadow-sm"
                                   />
                                 </div>
                                 {/* 교육과정 선택 */}
                                 <div className="space-y-1">
-                                  <p className="text-[9px] font-black text-rose-500">교육과정</p>
+                                  <p className="text-[9px] font-black text-blue-500">교육과정</p>
                                   <div className="flex gap-1">
                                     {['15개정', '22개정'].map(cur => (
-                                      <button key={cur} onClick={() => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { curriculum: cur, grade: '' }, { merge: true })}
-                                        className={`flex-1 py-1.5 rounded-xl text-[10px] font-black border transition-all ${(sd.curriculum || '') === cur ? 'bg-rose-500 border-rose-500 text-white' : 'border-rose-200 text-rose-400 bg-white hover:border-rose-400'}`}>
+                                      <button key={cur} onClick={() => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { curriculum: (sd.curriculum || '') === cur ? '' : cur, grade: '' }, { merge: true })}
+                                        className={`flex-1 py-1.5 rounded-xl text-[10px] font-black border transition-all ${(sd.curriculum || '') === cur ? 'bg-blue-500 border-blue-500 text-white' : 'border-blue-200 text-blue-400 bg-white hover:border-blue-400'}`}>
                                         {cur}
                                       </button>
                                     ))}
@@ -1795,7 +1795,7 @@ export default function App() {
                               </div>
                               {/* 등급 */}
                               <div className="space-y-1">
-                                <p className="text-[9px] font-black text-rose-500">등급</p>
+                                <p className="text-[9px] font-black text-blue-500">등급</p>
                                 {sd.curriculum ? (
                                   <div className="flex flex-wrap gap-1">
                                     {(sd.curriculum === '22개정'
@@ -1803,23 +1803,23 @@ export default function App() {
                                       : ['1등급','2등급','3등급','4등급','5등급','6등급','7등급','8등급','9등급']
                                     ).map(g => (
                                       <button key={g} onClick={() => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { grade: sd.grade === g ? '' : g }, { merge: true })}
-                                        className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-all ${sd.grade === g ? 'bg-rose-500 border-rose-500 text-white shadow-sm' : 'border-rose-200 text-rose-400 bg-white hover:border-rose-400'}`}>
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-all ${sd.grade === g ? 'bg-blue-500 border-blue-500 text-white shadow-sm' : 'border-blue-200 text-blue-400 bg-white hover:border-blue-400'}`}>
                                         {g}
                                       </button>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="text-[10px] text-rose-300 font-bold italic">교육과정 먼저 선택하세요</p>
+                                  <p className="text-[10px] text-blue-300 font-bold italic">교육과정 먼저 선택하세요</p>
                                 )}
                               </div>
                               {/* 성적 메모 */}
                               <div className="space-y-1">
-                                <p className="text-[9px] font-black text-rose-500">성적 메모</p>
+                                <p className="text-[9px] font-black text-blue-500">성적 메모</p>
                                 <BufferedTextarea
                                   value={sd.scoreMemo || ''}
                                   onSave={(v) => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentScores', s.id), { scoreMemo: v }, { merge: true })}
                                   placeholder="성적 관련 메모..."
-                                  className="w-full px-2 py-1.5 rounded-xl border border-rose-200 bg-white font-medium text-xs outline-none focus:border-rose-400 text-slate-700 resize-none h-14 shadow-sm"
+                                  className="w-full px-2 py-1.5 rounded-xl border border-blue-200 bg-white font-medium text-xs outline-none focus:border-blue-400 text-slate-700 resize-none h-14 shadow-sm"
                                 />
                               </div>
                             </div>
@@ -1847,8 +1847,8 @@ export default function App() {
                             if (!sd.prevScore && !sd.grade) return null;
                             return (
                               <div className="flex flex-wrap gap-2 mt-1">
-                                {sd.prevScore != null && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-rose-50 text-rose-600 border border-rose-200">{sd.prevScore}점</span>}
-                                {sd.grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-rose-50 text-rose-600 border border-rose-200">{sd.grade}</span>}
+                                {sd.prevScore != null && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">{sd.prevScore}점</span>}
+                                {sd.grade && <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">{sd.grade}</span>}
                                 {sd.curriculum && <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-50 text-slate-400 border border-slate-100">{sd.curriculum}</span>}
                               </div>
                             );
