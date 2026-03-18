@@ -1574,7 +1574,7 @@ export default function App() {
 
                       {/* 출결 버튼 */}
                       <div className="flex gap-1.5 shrink-0 pt-0.5">
-                        {[{ id: 'present', l: '출석', c: 'emerald' }, { id: 'late', l: '지각', c: 'amber' }, { id: 'absent', l: '결석', c: 'rose' }].map(opt => (
+                        {[{ id: 'present', l: '출석', c: 'emerald' }, { id: 'late', l: '지각', c: 'amber' }, { id: 'absent', l: '결석', c: 'red' }].map(opt => (
                           <button key={opt.id} onClick={() => updateAttendance(s.id, opt.id)} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.status === opt.id ? `bg-${opt.c}-500 border-${opt.c}-500 text-white shadow-lg` : 'bg-white border-slate-100 text-slate-400'}`}>{opt.l}</button>
                         ))}
                         <button onClick={() => updateAttendance(s.id, 'makeup')} disabled={userRole !== 'master'} className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all shadow-sm leading-none ${att.makeup ? 'bg-purple-500 border-purple-500 text-white shadow-lg shadow-purple-100' : 'bg-white border-slate-100 text-slate-400'} ${userRole === 'master' ? 'hover:border-slate-300' : 'cursor-default'}`}>보충</button>
@@ -1597,7 +1597,7 @@ export default function App() {
             const STATUS_LABEL = {
               present: { l: '출석', c: 'emerald' },
               late:    { l: '지각', c: 'amber' },
-              absent:  { l: '결석', c: 'rose' },
+              absent:  { l: '결석', c: 'red' },
               none:    { l: '-',    c: 'slate' }
             };
             return (
