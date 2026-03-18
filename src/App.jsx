@@ -2109,7 +2109,7 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
-                  <span className="text-[9px] font-bold text-slate-300">날짜를 클릭해 기간을 설정하세요 (첫 클릭 → 시작, 두 번째 클릭 → 종료)</span>
+                  <span className="text-[9px] font-bold text-slate-300">첫 클릭 → 시작  /  두 번째 클릭 → 종료  /  선택 날짜 재클릭 → 해제</span>
                 </div>
                 <ProgressMiniCalendar
                   progressPlans={progressPlans}
@@ -2123,15 +2123,20 @@ export default function App() {
                   highlightTo={reportRange.to}
                   onDateSelect={(date) => {
                     setReportRange(prev => {
-                      // 시작 날짜 없거나 이미 둘 다 있으면 → 시작 날짜 새로 설정
-                      if (!prev.from || (prev.from && prev.to)) {
-                        return { from: date, to: '' };
+                      // 아무것도 없으면 → 시작 날짜 설정
+                      if (!prev.from) return { from: date, to: '' };
+
+                      // 시작만 있을 때
+                      if (prev.from && !prev.to) {
+                        if (date === prev.from) return { from: '', to: '' }; // 같은 날 → 해제
+                        if (date < prev.from) return { from: date, to: prev.from }; // 앞 날짜 → 교체
+                        return { from: prev.from, to: date }; // 이후 날짜 → 종료 설정
                       }
-                      // 시작 날짜만 있고 같은 날 클릭 → 그냥 하루치로 유지
-                      if (date === prev.from) return prev;
-                      // 시작보다 앞 날짜면 교체
-                      if (date < prev.from) return { from: date, to: prev.from };
-                      return { from: prev.from, to: date };
+
+                      // 둘 다 있을 때
+                      if (date === prev.from) return { from: '', to: '' }; // 시작 클릭 → 전체 해제
+                      if (date === prev.to) return { from: prev.from, to: '' }; // 종료 클릭 → 종료만 해제
+                      return { from: date, to: '' }; // 다른 날짜 → 시작 새로 설정
                     });
                   }}
                 />
