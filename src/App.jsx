@@ -3047,9 +3047,9 @@ export default function App() {
                 // 학생별 요약 데이터
                 const studentSummary = students.map(s => {
                   const relAssign = rangedAssign.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
-                  const exemptA = relAssign.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'exempt').length;
-                  const effectiveA = relAssign.length - exemptA;
                   const doneA = relAssign.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
+                  const incompleteA = relAssign.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
+                  const effectiveA = doneA + incompleteA; // 과제현황표 동일: 완료+미완료만 분모
                   const assignPct = effectiveA > 0 ? Math.round(doneA / effectiveA * 100) : null;
 
                   const relMemo = memoItems.filter(m => m.type === 'all' || (m.targetStudents?.includes(s.id)));
