@@ -218,6 +218,12 @@ const comparePlans = (a, b) =>
   ((a.sortOrder ?? 1e15) - (b.sortOrder ?? 1e15)) ||
   (a.id || '').localeCompare(b.id || '');
 
+// --- 반별 → 가나다 정렬 (반 순서는 '반 설정' 순서, 미배정은 맨 뒤) ---
+const sortByClassThenName = (list, classrooms) => {
+  const order = (s) => { const i = classrooms.findIndex(c => c.id === s.classroomId); return i < 0 ? 9999 : i; };
+  return [...list].sort((a, b) => order(a) - order(b) || (a.name || '').localeCompare(b.name || '', 'ko'));
+};
+
 // --- KST 기준 오늘 날짜 (YYYY-MM-DD) ---
 // UTC 기준 toISOString() 사용 시 00~09시에 전날로 찍히는 문제 방지
 const getKstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -1059,7 +1065,9 @@ export default function App() {
   const [loginError, setLoginError] = useState(false);
 
   // Core Data
-  const [students, setStudents] = useState([]);
+  const [allStudents, setStudents] = useState([]); // 숨긴 학생 포함 전체
+  // 숨김(hidden) 학생은 학생 관리 탭을 제외한 모든 화면·집계·리포트에서 제외
+  const students = useMemo(() => allStudents.filter(s => !s.hidden), [allStudents]);
   const [assignments, setAssignments] = useState([]);
   const [memoItems, setMemoItems] = useState([]);
   const [submissions, setSubmissions] = useState({});
@@ -1092,6 +1100,7 @@ export default function App() {
   const [editPlanData, setEditPlanData] = useState(null);
 
   const [matrixHideDone, setMatrixHideDone] = useState(false);
+  const [matrixTargetOnly, setMatrixTargetOnly] = useState(true); // 대상인 학생·과제만 표시
   const [matrixStatusFilter, setMatrixStatusFilter] = useState('all'); // 'all' | 'incomplete' | 'completed'
   const [collapsedStudents, setCollapsedStudents] = useState({}); // 모바일 학생 접기
   const [hiddenStudents, setHiddenStudents] = useState({}); // 모바일 학생 on/off
@@ -1104,8 +1113,9 @@ export default function App() {
   const [editingClassrooms, setEditingClassrooms] = useState(false);
   const [classroomInput, setClassroomInput] = useState("");
   const [studentGoals, setStudentGoals] = useState({});
-  const [studentSort, setStudentSort] = useState('custom'); // 'custom' | 'name' | 'school' | 'group'
-  const [matrixSort, setMatrixSort] = useState('custom'); // 'custom' | 'name' | 'school' | 'group'
+  const [studentSort, setStudentSort] = useState('class'); // 'class' | 'custom' | 'name' | 'school' | 'group'
+  const [matrixSort, setMatrixSort] = useState('class'); // 'class' | 'custom' | 'name' | 'school' | 'group'
+  const [showHiddenStudents, setShowHiddenStudents] = useState(true); // 학생 관리: 숨긴 학생 카드 표시 여부
   const [matrixSchoolFilter, setMatrixSchoolFilter] = useState('all');
   const [matrixGroupFilter, setMatrixGroupFilter] = useState('all');
   const [confirmDelete, setConfirmDelete] = useState(null); // { coll, id, label }
@@ -1152,7 +1162,7 @@ export default function App() {
   // --- Logic Hooks ---
   const visibleStudentsFiltered = useMemo(() => {
     let base;
-    if (userRole === 'student' && myStudentId) return students.filter(s => s.id === myStudentId);
+    if (userRole === 'student' && myStudentId) return allStudents.filter(s => s.id === myStudentId);
     if (activeClassFilter !== 'all') base = students.filter(s => s.classroomId === activeClassFilter);
     else base = students;
     // 학교/그룹 필터 적용
@@ -1180,11 +1190,12 @@ export default function App() {
     }
     // matrixSort 적용
     const sorted = [...filtered];
+    if (matrixSort === 'class') return sortByClassThenName(sorted, classrooms);
     if (matrixSort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     else if (matrixSort === 'school') sorted.sort((a, b) => (a.highSchool||'').localeCompare(b.highSchool||'', 'ko') || a.name.localeCompare(b.name, 'ko'));
     else if (matrixSort === 'group') sorted.sort((a, b) => (a.group||'z').localeCompare(b.group||'z') || a.name.localeCompare(b.name, 'ko'));
     return sorted;
-  }, [students, userRole, myStudentId, activeClassFilter, matrixSort, matrixSchoolFilter, matrixGroupFilter, matrixStatusFilter, assignments, submissions]);
+  }, [students, allStudents, classrooms, userRole, myStudentId, activeClassFilter, matrixSort, matrixSchoolFilter, matrixGroupFilter, matrixStatusFilter, assignments, submissions]);
 
   // 출결 탭 전용: 반 필터 + 이름 검색
   const attStudents = useMemo(() => {
@@ -1260,7 +1271,7 @@ export default function App() {
   const handleAuthSubmit = () => {
     const passwords = { master: '71207179', teacher: '26350' };
     if (showPasswordInput === 'student') {
-      const found = students.find(s => s.studentCode && s.studentCode.trim() === studentCodeInput.trim());
+      const found = allStudents.find(s => s.studentCode && s.studentCode.trim() === studentCodeInput.trim());
       if (found) { handleLogin('student', found.id); setShowPasswordInput(null); }
       else { setLoginError(true); }
     } else if (passwordInput === passwords[showPasswordInput]) {
@@ -1596,7 +1607,7 @@ export default function App() {
     if (type === 'assignment') { list = assignments; coll = 'assignments'; }
     else if (type === 'memo') { list = memoItems; coll = 'memoItems'; }
     else if (type === 'test') { list = tests; coll = 'tests'; }
-    else if (type === 'student') { list = students; coll = 'students'; }
+    else if (type === 'student') { list = allStudents; coll = 'students'; }
     else return;
     const fromIdx = list.findIndex(x => x.id === fromId);
     const toIdx = list.findIndex(x => x.id === toId);
@@ -1610,6 +1621,14 @@ export default function App() {
     newList.forEach((item, i) => {
       batch.set(doc(db, 'artifacts', appId, 'public', 'data', coll, item.id), { sortOrder: i }, { merge: true });
     });
+    await batch.commit();
+  };
+
+  // 학생 보이기/숨기기 (여러 명 한 번에 가능)
+  const setStudentsHidden = async (ids, hidden) => {
+    if (userRole !== 'master' || ids.length === 0) return;
+    const batch = writeBatch(db);
+    ids.forEach(id => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'students', id), { hidden }, { merge: true }));
     await batch.commit();
   };
 
@@ -2002,7 +2021,8 @@ export default function App() {
                       {/* 정렬 */}
                       <div className="flex items-center gap-1">
                         {[
-                          { id: 'custom', label: '기본' },
+                          { id: 'class', label: '반별' },
+                          { id: 'custom', label: '직접' },
                           { id: 'name', label: '가나다' },
                           { id: 'school', label: '학교' },
                           { id: 'group', label: '그룹' },
@@ -2035,6 +2055,11 @@ export default function App() {
                           </button>
                         ))}
                       </div>
+                      <button onClick={() => setMatrixTargetOnly(v => !v)}
+                        title="켜면: 보이는 학생 중 대상자가 없는 과제 열, 보이는 과제 중 해당 과제가 없는 학생 행을 숨깁니다"
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixTargetOnly ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                        <UserCheck size={12}/>{matrixTargetOnly ? '대상만 보기 중' : '대상만 보기'}
+                      </button>
                       <button onClick={() => setMatrixHideDone(v => !v)}
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${matrixHideDone ? 'bg-blue-500 text-white border-blue-500 shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'}`}>
                         <CheckCircle2 size={12}/>{matrixHideDone ? '완료 숨김 중' : '완료 숨기기'}
@@ -2086,9 +2111,13 @@ export default function App() {
                         .map(([wk, items]) => ({ wk, label: getWeekLabelM(wk), items, isThisWeek: wk === thisWeekKeyM }));
                     })() : [];
                     const isWeekCollapsedM = (wk, isThisWeek) => collapsedWeeks[wk] !== undefined ? collapsedWeeks[wk] : !isThisWeek;
-                    const visibleItemsM = activeTab === 'matrix'
+                    const visibleItemsRawM = activeTab === 'matrix'
                       ? weekGroupsM.flatMap(({ wk, items, isThisWeek }) => isWeekCollapsedM(wk, isThisWeek) ? [] : items)
                       : allItemsM;
+                    // 대상만 보기: 보이는 학생 중 대상자가 있는 과제만
+                    const visibleItemsM = matrixTargetOnly
+                      ? visibleItemsRawM.filter(as => visibleStudentsFiltered.some(s => isItemTarget(as, s.id)))
+                      : visibleItemsRawM;
 
                     return (
                       <div>
@@ -2176,8 +2205,11 @@ export default function App() {
                         <div className="divide-y divide-slate-100">
                           {visibleStudentsFiltered
                             .filter(s => !studentSearchQuery || s.name.includes(studentSearchQuery))
+                            // 대상만 보기: 보이는 과제 중 해당 과제가 하나도 없는 학생은 숨김
+                            .filter(s => !matrixTargetOnly || visibleItemsM.length === 0 || visibleItemsM.some(as => isItemTarget(as, s.id)))
                             .map(s => {
-                            const items = visibleItemsM;
+                            // 대상만 보기: 학생 카드 안에도 본인 대상 과제만
+                            const items = matrixTargetOnly ? visibleItemsM.filter(as => isItemTarget(as, s.id)) : visibleItemsM;
 
                             // 진척도 계산 (전체 과제 기준)
                             let pctText, labelText;
@@ -2359,9 +2391,19 @@ export default function App() {
                     const isWeekCollapsed = (wk, isThisWeek) => collapsedWeeks[wk] !== undefined ? collapsedWeeks[wk] : !isThisWeek;
 
                     // 화면에 보일 items (접힌 주차 제외)
-                    const visibleItems = activeTab === 'matrix'
+                    const visibleItemsRaw = activeTab === 'matrix'
                       ? weekGroups.flatMap(({ wk, items, isThisWeek }) => isWeekCollapsed(wk, isThisWeek) ? [] : items)
                       : filteredItems;
+                    // 대상만 보기: 보이는 학생 중 대상자가 하나도 없는 과제 열은 숨김
+                    const visibleItems = matrixTargetOnly
+                      ? visibleItemsRaw.filter(as => visibleStudentsFiltered.some(s => isItemTarget(as, s.id)))
+                      : visibleItemsRaw;
+                    // 대상만 보기: 보이는 과제 중 해당 과제가 하나도 없는 학생 행은 숨김
+                    const tableStudents = matrixTargetOnly && visibleItems.length > 0
+                      ? visibleStudentsFiltered.filter(s => visibleItems.some(as => isItemTarget(as, s.id)))
+                      : visibleStudentsFiltered;
+                    const hiddenColCount = visibleItemsRaw.length - visibleItems.length;
+                    const hiddenRowCount = visibleStudentsFiltered.length - tableStudents.length;
 
                     // 과목별 그룹핑 (visibleItems 기준)
                     // 과목 목록에서 삭제된 과목의 항목도 사라지지 않도록 '기타' 그룹으로 함께 표시
@@ -2404,6 +2446,16 @@ export default function App() {
                               </button>
                             );
                           })}
+                        </div>
+                      )}
+                      {matrixTargetOnly && (hiddenColCount > 0 || hiddenRowCount > 0) && (
+                        <div className="px-4 py-2 border-b border-slate-100 bg-indigo-50/50 text-[10px] font-black text-indigo-500 flex items-center gap-1.5">
+                          <UserCheck size={11}/> 대상만 보기 —
+                          {hiddenRowCount > 0 && <span>대상 과제 없는 학생 {hiddenRowCount}명</span>}
+                          {hiddenRowCount > 0 && hiddenColCount > 0 && <span>·</span>}
+                          {hiddenColCount > 0 && <span>대상자 없는 과제 {hiddenColCount}개</span>}
+                          <span>숨김</span>
+                          <button onClick={() => setMatrixTargetOnly(false)} className="ml-auto underline text-indigo-400 hover:text-indigo-600">모두 보기</button>
                         </div>
                       )}
                       <table className="w-full text-left border-collapse">
@@ -2478,7 +2530,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-slate-800">
-                          {visibleStudentsFiltered.map(s => (
+                          {tableStudents.map(s => (
                             <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group text-center">
                               <td className="p-5 font-bold text-slate-700 sticky left-0 bg-white z-20 border-r flex flex-col items-start gap-1 justify-center text-left">
                                 <div className="flex items-center justify-between w-full">
@@ -3534,7 +3586,7 @@ export default function App() {
 
           {/* 출결 관리 탭 - student 전용 */}
           {activeTab === 'attendance' && userRole === 'student' && (() => {
-            const s = students.find(st => st.id === myStudentId);
+            const s = allStudents.find(st => st.id === myStudentId);
             if (!s) return null;
 
             // 진도 수업이 있는 날짜 목록
@@ -3733,6 +3785,7 @@ export default function App() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">정렬</span>
                   {[
+                    { id: 'class', label: '반별 · 가나다' },
                     { id: 'custom', label: '직접 설정' },
                     { id: 'name', label: '가나다순' },
                     { id: 'school', label: '학교별' },
@@ -3744,22 +3797,62 @@ export default function App() {
                       {opt.label}
                     </button>
                   ))}
+                  {/* 숨긴 학생 표시 on/off */}
+                  {allStudents.some(s => s.hidden) && (
+                    <button onClick={() => setShowHiddenStudents(v => !v)}
+                      className={`ml-auto flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${showHiddenStudents ? 'bg-white border-slate-200 text-slate-500' : 'bg-slate-700 border-slate-700 text-white'}`}>
+                      <span className={`relative w-7 h-4 rounded-full transition-all ${showHiddenStudents ? 'bg-emerald-500' : 'bg-white/30'}`}>
+                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${showHiddenStudents ? 'left-3.5' : 'left-0.5'}`}/>
+                      </span>
+                      숨긴 학생 {allStudents.filter(s => s.hidden).length}명 {showHiddenStudents ? '표시 중' : '감춤'}
+                    </button>
+                  )}
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(() => {
-                  let sorted = [...students];
-                  if (studentSort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-                  else if (studentSort === 'school') sorted.sort((a, b) => (a.highSchool||'').localeCompare(b.highSchool||'', 'ko') || a.name.localeCompare(b.name, 'ko'));
-                  else if (studentSort === 'group') sorted.sort((a, b) => (a.group||'z').localeCompare(b.group||'z') || a.name.localeCompare(b.name, 'ko'));
-                  return sorted;
-                })().map(s => (
+                  let base = showHiddenStudents ? [...allStudents] : allStudents.filter(s => !s.hidden);
+                  if (studentSort === 'class') {
+                    // 반별 묶음 헤더 + 반 안에서 가나다순
+                    const sortedAll = sortByClassThenName(base, classrooms);
+                    const sections = [...classrooms.map(c => ({ id: c.id, name: c.name })), { id: '__none', name: '반 미배정' }];
+                    const out = [];
+                    sections.forEach(sec => {
+                      const members = sortedAll.filter(s => sec.id === '__none' ? !classrooms.some(c => c.id === s.classroomId) : s.classroomId === sec.id);
+                      if (members.length === 0) return;
+                      out.push({ __header: true, id: 'h-' + sec.id, name: sec.name, members });
+                      out.push(...members);
+                    });
+                    return out;
+                  }
+                  if (studentSort === 'name') base.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+                  else if (studentSort === 'school') base.sort((a, b) => (a.highSchool||'').localeCompare(b.highSchool||'', 'ko') || a.name.localeCompare(b.name, 'ko'));
+                  else if (studentSort === 'group') base.sort((a, b) => (a.group||'z').localeCompare(b.group||'z') || a.name.localeCompare(b.name, 'ko'));
+                  return base;
+                })().map(s => s.__header ? (
+                  <div key={s.id} className="md:col-span-2 flex items-center gap-2 pt-2 first:pt-0">
+                    <span className="px-3 py-1 rounded-xl text-sm font-black text-white shadow-sm" style={{background:'var(--sc)'}}>{s.name}</span>
+                    <span className="text-[11px] font-black text-slate-400">
+                      {s.members.filter(m => !m.hidden).length}명{s.members.some(m => m.hidden) ? ` · 숨김 ${s.members.filter(m => m.hidden).length}` : ''}
+                    </span>
+                    <div className="flex-1 h-px bg-slate-200"/>
+                    {userRole === 'master' && (() => {
+                      const allHidden = s.members.every(m => m.hidden);
+                      return (
+                        <button onClick={() => setStudentsHidden(s.members.map(m => m.id), !allHidden)}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black border border-slate-200 bg-white text-slate-500 hover:border-slate-400">
+                          {allHidden ? '반 전체 보이기' : '반 전체 숨기기'}
+                        </button>
+                      );
+                    })()}
+                  </div>
+                ) : (
                   <div key={s.id}
-                    draggable={userRole === 'master' && !editStudentId}
+                    draggable={userRole === 'master' && !editStudentId && studentSort === 'custom'}
                     onDragStart={() => setDragState({ type: 'student', fromId: s.id, overId: null })}
                     onDragOver={(e) => { e.preventDefault(); setDragState(p => ({ ...p, overId: s.id })); }}
                     onDragEnd={() => { if (dragState.fromId && dragState.overId) reorderList('student', dragState.fromId, dragState.overId); setDragState({ type: null, fromId: null, overId: null }); }}
-                    className={`bg-white p-6 rounded-3xl border border-slate-200 shadow-sm group transition-all text-left leading-none ${dragState.overId === s.id && dragState.fromId !== s.id ? 'ring-2 ring-indigo-400 scale-[1.01]' : ''} ${userRole === 'master' && !editStudentId ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                    className={`p-6 rounded-3xl border shadow-sm group transition-all text-left leading-none ${s.hidden ? 'bg-slate-100 border-dashed border-slate-300 opacity-60' : 'bg-white border-slate-200'} ${dragState.overId === s.id && dragState.fromId !== s.id ? 'ring-2 ring-indigo-400 scale-[1.01]' : ''} ${userRole === 'master' && !editStudentId && studentSort === 'custom' ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                     {editStudentId === s.id ? (
                       <div className="space-y-4 animate-in slide-in-from-top-2 text-left leading-none">
                         <div className="grid grid-cols-2 gap-3 text-left leading-none">
@@ -3906,6 +3999,7 @@ export default function App() {
                         <div className="space-y-3 flex-1 text-left leading-none">
                           <div className="flex items-center gap-2 text-left leading-none">
                             <span className="font-bold text-xl text-slate-800 leading-none">#{s.studentCode || '000'} {s.name}</span>
+                            {s.hidden && <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-slate-200 text-slate-500 border border-slate-300">숨김</span>}
                             {/* 반 뱃지 */}
                             {userRole !== 'student' && s.classroomId && (() => {
                               const cr = classrooms.find(c => c.id === s.classroomId);
@@ -3934,9 +4028,19 @@ export default function App() {
                           })()}
                         </div>
                         {userRole === 'master' && (
-                          <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 leading-none">
+                          <div className="flex flex-col items-end gap-2 leading-none shrink-0">
+                          {/* 보이기/숨기기 토글 (항상 표시) */}
+                          <button onClick={() => setStudentsHidden([s.id], !s.hidden)} title={s.hidden ? '숨김 → 다시 보이기' : '보이는 중 → 숨기기'}
+                            className="flex items-center gap-1.5 text-[10px] font-black text-slate-500">
+                            <span>{s.hidden ? '숨김' : '표시'}</span>
+                            <span className={`relative w-9 h-5 rounded-full transition-all ${s.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${s.hidden ? 'left-0.5' : 'left-[18px]'}`}/>
+                            </span>
+                          </button>
+                          <div className="flex flex-col gap-2 md:opacity-0 md:group-hover:opacity-100 transition-all leading-none">
                             <button onClick={() => { setEditStudentId(s.id); setEditStudentData({ name: s.name, studentCode: s.studentCode || '', homeroomTeacher: s.homeroomTeacher || '', highSchool: s.highSchool || '', group: s.group || '', classroomId: s.classroomId || '' }); }} className="p-2 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all shadow-sm leading-none"><Edit2 size={18} /></button>
                             <button onClick={() => setConfirmDelete({ coll: 'students', id: s.id, label: s.name })} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all shadow-sm leading-none"><Trash2 size={18} /></button>
+                          </div>
                           </div>
                         )}
                       </div>
