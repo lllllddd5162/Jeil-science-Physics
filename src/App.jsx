@@ -151,7 +151,7 @@ function useWindowSize() {
 // --- Helper Functions ---
 const calculateRoundProgress = (students, items, submissionData, statusOrder, labels) => {
   return students.reduce((acc, s) => {
-    const rel = items.filter(a => a.type === 'all' || (a.targetStudents && a.targetStudents.includes(s.id)));
+    const rel = items.filter(a => isItemTarget(a, s.id));
     const initialCount = rel.length;
     if (initialCount === 0) { acc[s.id] = { label: "미부여", percent: "0.0" }; return acc; }
 
@@ -212,17 +212,35 @@ const calculateRoundProgress = (students, items, submissionData, statusOrder, la
 
 // --- [FIX 1] getTargetStudentNamesLocal 함수 추가 ---
 // 원본 코드에서 호출은 하지만 정의가 없어 런타임 에러 발생하던 함수
+// --- 진도 계획 정렬: 날짜 → 같은 날 순서(sortOrder) → 등록순 ---
+const comparePlans = (a, b) =>
+  (a.date || '').localeCompare(b.date || '') ||
+  ((a.sortOrder ?? 1e15) - (b.sortOrder ?? 1e15)) ||
+  (a.id || '').localeCompare(b.id || '');
+
+// --- KST 기준 오늘 날짜 (YYYY-MM-DD) ---
+// UTC 기준 toISOString() 사용 시 00~09시에 전날로 찍히는 문제 방지
+const getKstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+// --- 대상 판정 헬퍼: 전체 과제이거나 개별 지정 목록에 포함 ---
+const isItemTarget = (item, studentId) =>
+  !!item && (item.type === 'all' || (Array.isArray(item.targetStudents) && item.targetStudents.includes(studentId)));
+
 const getTargetStudentNamesLocal = (students, ids) =>
   students.filter(s => ids?.includes(s.id)).map(s => s.name).join(', ') || '없음';
 
 // --- Shared UI Components ---
-const BufferedInput = ({ value, onSave, placeholder, className, type = "text", disabled = false }) => {
-  const [temp, setTemp] = useState(value || '');
-  useEffect(() => { setTemp(value || ''); }, [value]);
-  const handleBlur = () => { if (!disabled && temp !== value) onSave(temp); };
+const BufferedInput = ({ value, onSave, placeholder, className, type = "text", disabled = false, autoFocus = false, onBlurNoChange, step, inputRef, onKeyDownExtra }) => {
+  const [temp, setTemp] = useState(value ?? '');
+  useEffect(() => { setTemp(value ?? ''); }, [value]);
+  const handleBlur = () => {
+    if (disabled) return;
+    if (String(temp) !== String(value ?? '')) onSave(temp);
+    else if (onBlurNoChange) onBlurNoChange();
+  };
   return (
-    <input type={type} value={temp} onChange={(e) => setTemp(e.target.value)} onBlur={handleBlur} disabled={disabled}
-      onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} placeholder={placeholder} className={`${className} select-text`} />
+    <input ref={inputRef} type={type} step={step} autoFocus={autoFocus} value={temp} onChange={(e) => setTemp(e.target.value)} onBlur={handleBlur} disabled={disabled}
+      onKeyDown={(e) => { if (onKeyDownExtra && onKeyDownExtra(e)) return; if (e.key === 'Enter') e.target.blur(); }} placeholder={placeholder} className={`${className} select-text`} />
   );
 };
 
@@ -459,6 +477,555 @@ function ProgressMiniCalendar({ progressPlans, progressCalMonth, setProgressCalM
 }
 
 
+// ============================================================
+// 시험 문항 정보 편집기 (등록 폼 · 수정 모달 공용)
+// - 객관식/주관식 문항 수, 표 형태 입력, 일괄 설정(난이도·배점·단원 붙여넣기)
+// ============================================================
+const qLabelOf = (q, qi) => `${q?.type === '주관식' ? '주' : '객'}${q?.num || qi + 1}`;
+
+function QuestionEditor({ test, onChange }) {
+  const questions = test.questions || [];
+  const mcQs = questions.filter(q => q.type === '객관식');
+  const saQs = questions.filter(q => q.type === '주관식');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [unitPaste, setUnitPaste] = useState('');
+  const [bulkMcPts, setBulkMcPts] = useState('');
+  const [bulkSaPts, setBulkSaPts] = useState('');
+
+  // 항상 객관식 → 주관식 순서로 재구성 (오답 번호 = 배열 순서)
+  const rebuild = (mc, sa, extra = {}) => onChange({
+    ...extra,
+    questions: [...mc.map((q, i) => ({ ...q, type: '객관식', num: i + 1 })), ...sa.map((q, i) => ({ ...q, type: '주관식', num: i + 1 }))],
+  });
+  const blankQ = (type) => ({ type, difficulty: '중', unit: '', detail: '', points: '' });
+  const setCount = (type, raw) => {
+    const cnt = Math.max(0, Math.min(100, parseInt(raw) || 0));
+    if (type === '객관식') rebuild(Array.from({ length: cnt }, (_, i) => mcQs[i] || blankQ('객관식')), saQs, { mcCount: raw });
+    else rebuild(mcQs, Array.from({ length: cnt }, (_, i) => saQs[i] || blankQ('주관식')), { saCount: raw });
+  };
+  const updateQ = (gi, field, val) => {
+    const qs = [...questions];
+    qs[gi] = { ...qs[gi], [field]: val };
+    onChange({ questions: qs });
+  };
+  const applyAll = (fn) => onChange({ questions: questions.map(fn) });
+
+  const totalPts = questions.reduce((a, q) => a + (parseFloat(q.points) || 0), 0);
+  const roundPts = Math.round(totalPts * 100) / 100;
+
+  const DCOL = { '하': 'text-blue-500', '중하': 'text-cyan-600', '중': 'text-slate-500', '중상': 'text-amber-600', '상': 'text-orange-600', '극상': 'text-red-600' };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        {[['객관식', test.mcCount, 'orange'], ['주관식', test.saCount, 'indigo']].map(([type, val, color]) => (
+          <div key={type} className="space-y-1">
+            <p className="text-[10px] uppercase font-black ml-1 text-slate-400">{type} 문항 수</p>
+            <div className="relative">
+              <input type="number" min="0" value={val ?? ''} onChange={(e) => setCount(type, e.target.value)} placeholder="0"
+                className={`w-full pl-4 pr-14 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-${color}-400 transition-all text-slate-800 shadow-sm`} />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-black text-slate-400 pointer-events-none">문항</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {questions.length > 0 && (
+        <>
+          {/* 합계 + 일괄 설정 토글 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black border ${roundPts === 100 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : roundPts > 0 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+              배점 합계 {roundPts}점{roundPts > 0 && roundPts !== 100 ? ' (100점 아님)' : ''}
+            </span>
+            <button type="button" onClick={() => setBulkOpen(v => !v)}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-black border-2 transition-all ${bulkOpen ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'}`}>
+              ⚡ 일괄 설정 {bulkOpen ? '닫기' : '열기'}
+            </button>
+          </div>
+
+          {bulkOpen && (
+            <div className="p-3 bg-slate-800 rounded-2xl space-y-3 text-white">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-black text-white/60 w-16">난이도</span>
+                {DIFFICULTIES.map(d => (
+                  <button key={d} type="button" onClick={() => applyAll(q => ({ ...q, difficulty: d }))}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-white/10 hover:bg-white/25">{d}</button>
+                ))}
+                <span className="text-[10px] text-white/40">← 전 문항 적용</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-black text-white/60 w-16">배점</span>
+                {mcQs.length > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <input type="number" step="any" value={bulkMcPts} onChange={e => setBulkMcPts(e.target.value)} placeholder="객관식"
+                      className="w-20 px-2 py-1.5 rounded-lg text-[11px] font-black bg-white text-slate-800 outline-none" />
+                    <button type="button" disabled={bulkMcPts === ''} onClick={() => applyAll(q => q.type === '객관식' ? { ...q, points: parseFloat(bulkMcPts) } : q)}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-orange-500 disabled:opacity-30">객관식 적용</button>
+                  </span>
+                )}
+                {saQs.length > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <input type="number" step="any" value={bulkSaPts} onChange={e => setBulkSaPts(e.target.value)} placeholder="주관식"
+                      className="w-20 px-2 py-1.5 rounded-lg text-[11px] font-black bg-white text-slate-800 outline-none" />
+                    <button type="button" disabled={bulkSaPts === ''} onClick={() => applyAll(q => q.type === '주관식' ? { ...q, points: parseFloat(bulkSaPts) } : q)}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-indigo-500 disabled:opacity-30">주관식 적용</button>
+                  </span>
+                )}
+                <button type="button" onClick={() => { const each = Math.round((100 / questions.length) * 100) / 100; applyAll(q => ({ ...q, points: each })); }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-white/10 hover:bg-white/25">100점 균등 분배</button>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-black text-white/60">단원 붙여넣기 — 한 줄에 한 문항씩, 1번부터 순서대로 (엑셀 열 복사 OK)</span>
+                <textarea value={unitPaste} onChange={e => setUnitPaste(e.target.value)} rows={4}
+                  placeholder={'역학적 에너지\n운동량 보존\n...'}
+                  className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-white text-slate-800 outline-none resize-y" />
+                <button type="button" disabled={!unitPaste.trim()} onClick={() => {
+                  const lines = unitPaste.split(/\r?\n/).map(l => l.trim());
+                  onChange({ questions: questions.map((q, i) => (lines[i] ? { ...q, unit: lines[i] } : q)) });
+                  setUnitPaste('');
+                }} className="px-3 py-1.5 rounded-lg text-[11px] font-black bg-emerald-500 disabled:opacity-30">단원 적용</button>
+              </div>
+            </div>
+          )}
+
+          {/* 표 형태 문항 입력 */}
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="hidden md:grid grid-cols-[56px_92px_80px_1fr_1fr] gap-2 px-3 py-2 bg-slate-50 text-[10px] font-black text-slate-400">
+              <span>문항</span><span>난이도</span><span>배점</span><span>출제 단원</span><span>세부 정보</span>
+            </div>
+            <div className="divide-y divide-slate-100 max-h-[460px] overflow-y-auto">
+              {questions.map((q, gi) => (
+                <div key={gi} className="grid grid-cols-[56px_1fr_80px] md:grid-cols-[56px_92px_80px_1fr_1fr] gap-2 px-3 py-2 items-center bg-white">
+                  <span className={`text-xs font-black ${q.type === '주관식' ? 'text-indigo-600' : 'text-orange-600'}`}>{qLabelOf(q, gi)}</span>
+                  <select value={q.difficulty || '중'} onChange={e => updateQ(gi, 'difficulty', e.target.value)}
+                    className={`px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-black outline-none ${DCOL[q.difficulty] || ''}`}>
+                    {DIFFICULTIES.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <div className="relative">
+                    <input type="number" min="0" step="any" value={q.points ?? ''} onChange={e => updateQ(gi, 'points', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      placeholder="0" className="w-full pl-2 pr-6 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-slate-400 text-slate-700" />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 pointer-events-none">점</span>
+                  </div>
+                  <input value={q.unit || ''} onChange={e => updateQ(gi, 'unit', e.target.value)} placeholder="출제 단원"
+                    className="col-span-3 md:col-span-1 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-slate-400 text-slate-700" />
+                  <input value={q.detail || ''} onChange={e => updateQ(gi, 'detail', e.target.value)} placeholder="세부 정보 (오답 포인트 등)"
+                    className="col-span-3 md:col-span-1 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:border-slate-400 text-slate-600" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 성적 빠른 입력창 — 한 시험의 전체 학생 점수·오답·결시·메모를 한 화면에서 입력
+// - Enter: 점수 → 오답 → 다음 학생 / ↑↓: 같은 칸 위아래 이동
+// - 오답 입력: "3 5 12" 또는 "3,5,주2" (주=주관식), "3-5" 범위도 가능
+// - 배점이 있으면 오답 기준 점수 자동 계산
+// ============================================================
+function parseWrongText(text, questions) {
+  const qs = questions || [];
+  const mcIdx = []; const saIdx = [];
+  qs.forEach((q, i) => (q.type === '주관식' ? saIdx : mcIdx).push(i + 1));
+  const out = new Set();
+  const bad = [];
+  (text || '').split(/[,\s/]+/).map(t => t.trim()).filter(Boolean).forEach(tok => {
+    const m = tok.match(/^(주|서|s|S|객|k|K)?(\d+)번?(?:[-~](\d+)번?)?$/);
+    if (!m) { bad.push(tok); return; }
+    const isSa = /^(주|서|s|S)$/.test(m[1] || '');
+    const from = parseInt(m[2]); const to = m[3] ? parseInt(m[3]) : from;
+    for (let n = Math.min(from, to); n <= Math.max(from, to); n++) {
+      if (qs.length === 0) { out.add(n); continue; }
+      const pool = isSa ? saIdx : (mcIdx.length > 0 ? mcIdx : saIdx);
+      if (pool[n - 1]) out.add(pool[n - 1]); else bad.push(tok);
+    }
+  });
+  return { nums: [...out].sort((a, b) => a - b), bad: [...new Set(bad)] };
+}
+function formatWrongNums(nums, questions) {
+  const qs = questions || [];
+  const hasMc = qs.some(q => q.type !== '주관식');
+  return (nums || []).slice().sort((a, b) => a - b).map(n => {
+    const q = qs[n - 1];
+    if (!q) return String(n);
+    if (q.type === '주관식') return hasMc ? `주${q.num || n}` : String(q.num || n);
+    return String(q.num || n);
+  }).join(', ');
+}
+
+function ScoreEntryModal({ test, students, testScores, onClose, onSave }) {
+  const questions = test.questions || [];
+  const totalPts = questions.reduce((a, q) => a + (parseFloat(q.points) || 0), 0);
+  const hasSa = questions.some(q => q.type === '주관식');
+  const hasMc = questions.some(q => q.type !== '주관식');
+
+  const initRows = () => {
+    const r = {};
+    students.forEach(s => {
+      const d = testScores[`${s.id}-${test.id}`] || {};
+      r[s.id] = {
+        score: d.score ?? '',
+        wrongText: formatWrongNums(d.wrongNums || [], questions),
+        absent: d.absent || '',
+        plan: d.plan || '',
+        partialScores: d.partialScores || {},
+      };
+    });
+    return r;
+  };
+  const [rows, setRows] = useState(initRows);
+  const [initial] = useState(initRows);
+  const [autoCalc, setAutoCalc] = useState(totalPts > 0);
+  const [activeRow, setActiveRow] = useState(students[0]?.id || null);
+  const [saving, setSaving] = useState(false);
+  const refs = React.useRef({});
+
+  const calcScore = (wrongNums, partialScores) => {
+    if (totalPts <= 0) return null;
+    const ded = wrongNums.reduce((a, n) => {
+      const q = questions[n - 1];
+      if (!q) return a;
+      if (q.type === '주관식' && partialScores?.[n] != null && partialScores[n] !== '') return a + (parseFloat(partialScores[n]) || 0);
+      return a + (parseFloat(q.points) || 0);
+    }, 0);
+    return Math.round((totalPts - ded) * 100) / 100;
+  };
+
+  const updateRow = (sid, patch) => setRows(prev => {
+    const cur = { ...prev[sid], ...patch };
+    if (autoCalc && !cur.absent && ('wrongText' in patch || 'partialScores' in patch)) {
+      const { nums } = parseWrongText(cur.wrongText, questions);
+      const sc = calcScore(nums, cur.partialScores);
+      if (sc !== null) cur.score = sc;
+    }
+    return { ...prev, [sid]: cur };
+  });
+
+  const toggleWrong = (sid, n) => {
+    const { nums } = parseWrongText(rows[sid].wrongText, questions);
+    const next = nums.includes(n) ? nums.filter(x => x !== n) : [...nums, n];
+    updateRow(sid, { wrongText: formatWrongNums(next, questions) });
+  };
+
+  const focusCell = (idx, col) => {
+    const s = students[idx];
+    if (!s) return;
+    const el = refs.current[`${s.id}-${col}`];
+    if (el) { el.focus(); if (el.select) el.select(); }
+  };
+  const onKey = (e, idx, col) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (col === 'score') focusCell(idx, 'wrong');
+      else focusCell(idx + 1, 'score');
+    } else if (e.key === 'ArrowDown') { e.preventDefault(); focusCell(idx + 1, col); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); focusCell(idx - 1, col); }
+  };
+
+  const isChanged = (sid) => JSON.stringify(rows[sid]) !== JSON.stringify(initial[sid]);
+  const changedIds = students.map(s => s.id).filter(isChanged);
+  const filledCount = students.filter(s => rows[s.id].absent || rows[s.id].score !== '').length;
+  const valid = students.map(s => rows[s.id]).filter(r => !r.absent && r.score !== '' && !isNaN(parseFloat(r.score))).map(r => parseFloat(r.score));
+  const avg = valid.length ? (valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1) : '-';
+
+  const handleSave = async (closeAfter) => {
+    if (changedIds.length === 0) { if (closeAfter) onClose(); return; }
+    setSaving(true);
+    const payload = {};
+    changedIds.forEach(sid => {
+      const r = rows[sid];
+      const { nums } = parseWrongText(r.wrongText, questions);
+      const ps = {};
+      nums.forEach(n => { if (r.partialScores?.[n] != null) ps[n] = r.partialScores[n]; });
+      payload[sid] = {
+        absent: r.absent || false,
+        score: r.absent ? null : (r.score === '' || isNaN(parseFloat(r.score)) ? null : parseFloat(r.score)),
+        wrongNums: r.absent ? [] : nums,
+        partialScores: r.absent ? {} : ps,
+        plan: r.plan || '',
+      };
+    });
+    try { await onSave(payload); } finally { setSaving(false); }
+    if (closeAfter) onClose();
+  };
+
+  const tryClose = () => {
+    if (changedIds.length > 0 && !window.confirm(`저장하지 않은 변경 ${changedIds.length}건이 있습니다. 저장하지 않고 닫을까요?`)) return;
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center p-2 md:p-6 bg-slate-900/70 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+        {/* 헤더 */}
+        <div className="bg-orange-600 px-5 py-4 text-white flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black text-orange-100">{test.date} · {test.testType || '중간 테스트'}{totalPts > 0 ? ` · 배점 합계 ${Math.round(totalPts * 100) / 100}점` : ''}</p>
+            <h2 className="text-lg md:text-xl font-black leading-tight truncate">✏️ {test.title} 성적 입력</h2>
+          </div>
+          <button onClick={tryClose} className="p-1 hover:bg-white/10 rounded-full shrink-0"><LucideX size={22} /></button>
+        </div>
+
+        {/* 안내 + 옵션 */}
+        <div className="px-5 py-3 bg-orange-50 border-b border-orange-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-bold text-orange-700">
+          <span>⌨️ Enter: 점수 → 오답 → 다음 학생 · ↑↓ 이동</span>
+          <span>오답 예) <b>3 5 12</b>{hasSa && hasMc ? <>, <b>주2</b>(주관식)</> : null}, <b>7-9</b>(범위)</span>
+          {totalPts > 0 ? (
+            <label className="flex items-center gap-1.5 cursor-pointer select-none ml-auto">
+              <input type="checkbox" checked={autoCalc} onChange={e => setAutoCalc(e.target.checked)} className="w-4 h-4 accent-orange-600" />
+              오답 입력 시 점수 자동 계산
+            </label>
+          ) : (
+            <span className="ml-auto text-orange-400">※ 문항 배점을 넣으면 점수 자동 계산이 됩니다</span>
+          )}
+        </div>
+
+        {/* 입력 표 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="hidden md:grid grid-cols-[120px_112px_96px_1fr_180px] gap-2 px-5 py-2 bg-slate-50 text-[10px] font-black text-slate-400 sticky top-0 z-10">
+            <span>학생</span><span>응시</span><span>점수</span><span>오답 문항</span><span>메모</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {students.map((s, idx) => {
+              const r = rows[s.id];
+              const { nums, bad } = parseWrongText(r.wrongText, questions);
+              const changed = isChanged(s.id);
+              const active = activeRow === s.id;
+              return (
+                <div key={s.id} onFocus={() => setActiveRow(s.id)}
+                  className={`px-4 md:px-5 py-2.5 transition-colors ${active ? 'bg-orange-50/60' : changed ? 'bg-amber-50/40' : 'bg-white'}`}>
+                  <div className="grid grid-cols-[1fr_96px] md:grid-cols-[120px_112px_96px_1fr_180px] gap-2 items-center">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-black text-sm text-slate-800 truncate">{s.name}</span>
+                      {changed && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" title="변경됨"/>}
+                    </div>
+                    <select value={r.absent} onChange={e => updateRow(s.id, { absent: e.target.value })}
+                      className={`px-2 py-2 rounded-xl border text-xs font-black outline-none ${r.absent === 'absent' ? 'bg-red-50 border-red-200 text-red-600' : r.absent === 'excluded' ? 'bg-slate-100 border-slate-300 text-slate-500' : 'bg-white border-slate-200 text-slate-600'}`}>
+                      <option value="">응시</option>
+                      <option value="absent">결시</option>
+                      <option value="excluded">비대상</option>
+                    </select>
+                    <input ref={el => { refs.current[`${s.id}-score`] = el; }} type="number" step="any" inputMode="decimal"
+                      value={r.absent ? '' : r.score} disabled={!!r.absent} placeholder={r.absent ? '-' : '점수'}
+                      onChange={e => updateRow(s.id, { score: e.target.value })} onKeyDown={e => onKey(e, idx, 'score')}
+                      className="col-span-1 px-2 py-2 rounded-xl border border-orange-200 bg-white text-center font-black text-base text-orange-700 outline-none focus:border-orange-500 disabled:bg-slate-50 disabled:border-slate-100" />
+                    <div className="col-span-2 md:col-span-1 min-w-0">
+                      <input ref={el => { refs.current[`${s.id}-wrong`] = el; }} value={r.wrongText} disabled={!!r.absent}
+                        placeholder={r.absent ? '-' : '오답 번호 (예: 3 5 12)'}
+                        onChange={e => updateRow(s.id, { wrongText: e.target.value })} onKeyDown={e => onKey(e, idx, 'wrong')}
+                        className={`w-full px-3 py-2 rounded-xl border bg-white text-sm font-bold outline-none focus:border-red-400 text-red-600 disabled:bg-slate-50 ${bad.length ? 'border-red-400' : 'border-slate-200'}`} />
+                      {bad.length > 0 && <p className="text-[10px] font-bold text-red-500 mt-0.5">없는 문항: {bad.join(', ')}</p>}
+                    </div>
+                    <input value={r.plan} onChange={e => updateRow(s.id, { plan: e.target.value })} placeholder="메모"
+                      className="col-span-2 md:col-span-1 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium outline-none focus:bg-white focus:border-slate-400 text-slate-600" />
+                  </div>
+                  {/* 선택된 학생: 문항 칩 클릭 토글 + 서술형 부분 감점 */}
+                  {active && !r.absent && questions.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {questions.map((q, qi) => {
+                          const on = nums.includes(qi + 1);
+                          return (
+                            <button key={qi} type="button" tabIndex={-1} onMouseDown={e => e.preventDefault()} onClick={() => toggleWrong(s.id, qi + 1)}
+                              title={[q.difficulty, q.points ? `${q.points}점` : '', q.unit].filter(Boolean).join(' · ')}
+                              className={`min-w-[34px] px-1.5 py-1 rounded-lg text-[10px] font-black border-2 leading-none transition-all ${on ? 'bg-red-500 border-red-500 text-white' : q.type === '주관식' ? 'bg-white border-indigo-100 text-indigo-300 hover:border-red-300' : 'bg-white border-slate-200 text-slate-400 hover:border-red-300'}`}>
+                              {qLabelOf(q, qi)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {nums.some(n => questions[n - 1]?.type === '주관식') && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-400">서술형 감점</span>
+                          {nums.filter(n => questions[n - 1]?.type === '주관식').map(n => {
+                            const q = questions[n - 1];
+                            return (
+                              <span key={n} className="inline-flex items-center gap-1">
+                                <span className="text-[10px] font-black text-red-500">{qLabelOf(q, n - 1)}</span>
+                                <input type="number" min="0" step="any" value={r.partialScores?.[n] ?? (q.points ?? '')}
+                                  onChange={e => updateRow(s.id, { partialScores: { ...(r.partialScores || {}), [n]: e.target.value === '' ? '' : parseFloat(e.target.value) } })}
+                                  className="w-16 px-2 py-1 bg-red-50 border border-red-200 rounded-lg text-[11px] font-black text-red-700 outline-none text-center" />
+                                <span className="text-[10px] text-slate-400">/ {q.points || 0}점</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 하단 */}
+        <div className="px-5 py-3 border-t border-slate-100 bg-white flex flex-wrap items-center gap-3">
+          <span className="text-[11px] font-black text-slate-500">입력 {filledCount}/{students.length}명</span>
+          <span className="text-[11px] font-black text-orange-600">평균 미리보기 {avg}{avg !== '-' ? '점' : ''}</span>
+          {changedIds.length > 0 && <span className="text-[11px] font-black text-amber-600">변경 {changedIds.length}건</span>}
+          <div className="ml-auto flex gap-2">
+            <button onClick={tryClose} className="px-4 py-2.5 bg-slate-100 text-slate-500 rounded-xl font-black text-sm">닫기</button>
+            <button onClick={() => handleSave(false)} disabled={saving || changedIds.length === 0}
+              className="px-4 py-2.5 bg-white border-2 border-orange-500 text-orange-600 rounded-xl font-black text-sm disabled:opacity-30">저장</button>
+            <button onClick={() => handleSave(true)} disabled={saving}
+              className="px-5 py-2.5 bg-orange-500 text-white rounded-xl font-black text-sm shadow-md hover:bg-orange-600 disabled:opacity-50 flex items-center gap-1.5">
+              {saving ? <Loader2 size={14} className="animate-spin"/> : <Save size={14}/>} 저장 후 닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- 과제/암기 개별 대상 선택기 ---
+// 반·학교·그룹 묶음 선택, 이름 검색, 반전, 저장된 대상 목록(프리셋), 이전 과제 대상 불러오기
+function TargetStudentPicker({ students, classrooms, selected, onChange, presets = [], onSavePreset, onDeletePreset, pastItems = [] }) {
+  const [q, setQ] = useState('');
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const sel = new Set(selected || []);
+
+  const setIds = (ids) => onChange([...new Set(ids)]);
+  // 묶음 토글: 모두 선택돼 있으면 빼고, 아니면 추가
+  const toggleBundle = (ids) => {
+    if (ids.length === 0) return;
+    const allOn = ids.every(id => sel.has(id));
+    if (allOn) setIds([...sel].filter(id => !ids.includes(id)));
+    else setIds([...sel, ...ids]);
+  };
+  const bundleBtn = (key, label, ids, tone) => {
+    const allOn = ids.length > 0 && ids.every(id => sel.has(id));
+    const someOn = !allOn && ids.some(id => sel.has(id));
+    const tones = {
+      indigo: allOn ? 'bg-indigo-500 border-indigo-500 text-white' : someOn ? 'bg-indigo-50 border-indigo-300 text-indigo-600' : 'bg-white border-indigo-200 text-indigo-600 hover:border-indigo-400',
+      slate:  allOn ? 'bg-slate-600 border-slate-600 text-white'   : someOn ? 'bg-slate-100 border-slate-300 text-slate-600' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400',
+      amber:  allOn ? 'bg-amber-500 border-amber-500 text-white'   : someOn ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-amber-200 text-amber-600 hover:border-amber-400',
+    };
+    return (
+      <button key={key} type="button" onClick={() => toggleBundle(ids)}
+        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border-2 transition-all leading-none ${tones[tone]}`}>
+        {label} <span className="opacity-60">{ids.length}</span>
+      </button>
+    );
+  };
+
+  const schools = [...new Set(students.map(s => s.highSchool).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const groups = [...new Set(students.map(s => s.group).filter(Boolean))].sort();
+  const usedClassrooms = classrooms.filter(c => students.some(s => s.classroomId === c.id));
+  const recentPast = pastItems.filter(it => it.type === 'individual' && (it.targetStudents || []).length > 0).slice(-15).reverse();
+
+  const shown = students.filter(s => (!q.trim() || s.name.includes(q.trim())) && (!onlySelected || sel.has(s.id)));
+
+  return (
+    <div className="space-y-3 p-3 md:p-4 bg-slate-50 rounded-2xl border border-slate-200">
+      {/* 상단: 선택 수 + 기본 동작 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-indigo-600 text-white leading-none">{sel.size}명 선택</span>
+        <button type="button" onClick={() => setIds(students.map(s => s.id))} className="px-2.5 py-1.5 rounded-lg text-[11px] font-black border-2 border-slate-200 bg-white text-slate-500 hover:border-slate-400 leading-none">전체</button>
+        <button type="button" onClick={() => setIds([])} className="px-2.5 py-1.5 rounded-lg text-[11px] font-black border-2 border-slate-200 bg-white text-slate-500 hover:border-slate-400 leading-none">해제</button>
+        <button type="button" onClick={() => setIds(students.filter(s => !sel.has(s.id)).map(s => s.id))} className="px-2.5 py-1.5 rounded-lg text-[11px] font-black border-2 border-slate-200 bg-white text-slate-500 hover:border-slate-400 leading-none">반전</button>
+        {recentPast.length > 0 && (
+          <select value="" onChange={e => { const it = recentPast.find(x => x.id === e.target.value); if (it) setIds(it.targetStudents.filter(id => students.some(s => s.id === id))); }}
+            className="px-2 py-1.5 rounded-lg text-[11px] font-black border-2 border-slate-200 bg-white text-slate-500 outline-none max-w-[200px]">
+            <option value="">이전 과제 대상 불러오기…</option>
+            {recentPast.map(it => <option key={it.id} value={it.id}>{it.title} ({it.targetStudents.length}명)</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* 저장된 대상 목록 */}
+      {(presets.length > 0 || onSavePreset) && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-black text-slate-400">⭐ 저장된 대상 목록</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {presets.map(pr => {
+              const ids = (pr.ids || []).filter(id => students.some(s => s.id === id));
+              return (
+                <span key={pr.id} className="inline-flex items-center">
+                  <button type="button" onClick={() => setIds(ids)} title="이 목록으로 바꾸기"
+                    className="px-2.5 py-1.5 rounded-l-lg text-[11px] font-black border-2 border-r-0 border-violet-200 bg-white text-violet-600 hover:bg-violet-50 leading-none">
+                    {pr.name} <span className="opacity-60">{ids.length}</span>
+                  </button>
+                  {onDeletePreset && (
+                    <button type="button" onClick={() => onDeletePreset(pr.id)} title="목록 삭제"
+                      className="px-1.5 py-1.5 rounded-r-lg text-[11px] font-black border-2 border-violet-200 bg-white text-violet-300 hover:text-red-500 leading-none">×</button>
+                  )}
+                </span>
+              );
+            })}
+            {onSavePreset && (
+              <span className="inline-flex items-center gap-1">
+                <input value={presetName} onChange={e => setPresetName(e.target.value)} placeholder="현재 선택을 이름 붙여 저장"
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 border-violet-100 bg-white outline-none focus:border-violet-300 w-44 text-slate-700" />
+                <button type="button" disabled={!presetName.trim() || sel.size === 0}
+                  onClick={() => { onSavePreset(presetName.trim(), [...sel]); setPresetName(''); }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-violet-500 text-white disabled:opacity-30 leading-none">저장</button>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 묶음 선택 */}
+      {usedClassrooms.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-black text-slate-400">반 (누르면 추가 / 다시 누르면 빼기)</p>
+          <div className="flex flex-wrap gap-1.5">{usedClassrooms.map(c => bundleBtn('c' + c.id, c.name, students.filter(s => s.classroomId === c.id).map(s => s.id), 'indigo'))}</div>
+        </div>
+      )}
+      {schools.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-black text-slate-400">학교</p>
+          <div className="flex flex-wrap gap-1.5">{schools.map(sc => bundleBtn('s' + sc, sc, students.filter(s => s.highSchool === sc).map(s => s.id), 'slate'))}</div>
+        </div>
+      )}
+      {groups.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-black text-slate-400">그룹 (내부용)</p>
+          <div className="flex flex-wrap gap-1.5">{groups.map(g => bundleBtn('g' + g, `그룹 ${g}`, students.filter(s => s.group === g).map(s => s.id), 'amber'))}</div>
+        </div>
+      )}
+
+      {/* 개별 선택 */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"/>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="이름 검색..."
+            className="w-full pl-8 pr-3 py-2 rounded-xl border bg-white text-sm font-bold outline-none focus:border-indigo-300 text-slate-700" />
+        </div>
+        <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-500 select-none cursor-pointer shrink-0">
+          <input type="checkbox" checked={onlySelected} onChange={e => setOnlySelected(e.target.checked)} className="w-4 h-4 accent-indigo-600"/> 선택만 보기
+        </label>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 max-h-72 overflow-y-auto">
+        {shown.map(s => {
+          const checked = sel.has(s.id);
+          return (
+            <button key={s.id} type="button" onClick={() => checked ? setIds([...sel].filter(id => id !== s.id)) : setIds([...sel, s.id])}
+              className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border-2 text-left transition-all ${checked ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+              <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 ${checked ? 'bg-white border-white' : 'border-slate-300'}`}>
+                {checked && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black truncate leading-none">{s.name}</p>
+                <p className={`text-[9px] font-bold leading-none mt-1 truncate ${checked ? 'text-indigo-200' : 'text-slate-400'}`}>
+                  {[s.highSchool, s.group && `그룹 ${s.group}`].filter(Boolean).join(' · ') || ' '}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+        {shown.length === 0 && <p className="col-span-full text-center text-[11px] font-bold text-slate-400 py-4">표시할 학생이 없습니다.</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -474,11 +1041,14 @@ export default function App() {
   const [siteTitle, setSiteTitle] = useState('Science Academy');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [siteColor, setSiteColor] = useState('#3730a3');
+  const [savedSiteColor, setSavedSiteColor] = useState('#3730a3'); // DB에 저장된 색 (미리보기 취소용)
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [reportRange, setReportRange] = useState({ from: '', to: '' });
   const [reportText, setReportText] = useState('');
   const [aiAnalysis, setAiAnalysis] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
+  const [aiCopied, setAiCopied] = useState(''); // '' | 'ok' | 'fail'
+  const [aiAnonymize, setAiAnonymize] = useState(true); // 학생 이름 익명화 후 복사
+  const [aiPreviewOpen, setAiPreviewOpen] = useState(false);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [reportViewMode, setReportViewMode] = useState('summary');
 
@@ -510,10 +1080,14 @@ export default function App() {
     return k.toISOString().slice(0, 7);
   });
   const [progressSelectedDate, setProgressSelectedDate] = useState(() => {
-    return new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
+    return getKstToday();
   });
   const [newPlan, setNewPlan] = useState({ subject: '물리', unit: '', memo: '', lessonType: '진도' });
   const [editPlanId, setEditPlanId] = useState(null);
+  const [targetPresets, setTargetPresets] = useState([]); // 저장된 대상 목록
+  const [selectedPlanIds, setSelectedPlanIds] = useState({}); // 진도 일괄 선택 { planId: true }
+  const [planBulkDate, setPlanBulkDate] = useState('');       // 일괄 이동/복사 대상 날짜
+  const [planListOpen, setPlanListOpen] = useState(false);    // 월간 목록 펼침
   const [editPlanData, setEditPlanData] = useState(null);
 
   const [matrixHideDone, setMatrixHideDone] = useState(false);
@@ -524,6 +1098,8 @@ export default function App() {
   const [collapsedWeeks, setCollapsedWeeks] = useState({});
   const [classrooms, setClassrooms] = useState([]);
   const [activeClassFilter, setActiveClassFilter] = useState("all");
+  const [attClassFilter, setAttClassFilter] = useState('all');
+  const [attSearch, setAttSearch] = useState('');
   const [editingClassrooms, setEditingClassrooms] = useState(false);
   const [classroomInput, setClassroomInput] = useState("");
   const [studentGoals, setStudentGoals] = useState({});
@@ -536,6 +1112,7 @@ export default function App() {
   const [dragState, setDragState] = useState({ type: null, fromId: null, overId: null });
   const [testSectionCollapsed, setTestSectionCollapsed] = useState({ main: false, mini: false });
   const [weakUnitOpen, setWeakUnitOpen] = useState(true);
+  const [guideOpen, setGuideOpen] = useState(false); // 상태 가이드 카드 (기본 접힘)
 
   // UI Support
   const [currentDate, setCurrentDate] = useState(() => {
@@ -550,6 +1127,7 @@ export default function App() {
   const [bulkSelectedDate, setBulkSelectedDate] = useState(() => { const k = new Date(Date.now() + 9*60*60*1000); return k.toISOString().split('T')[0]; });
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedTest, setSelectedTest] = useState(null);
+  const [scoreEntryTest, setScoreEntryTest] = useState(null); // 성적 빠른 입력창 대상 시험
   const [isTestEditMode, setIsTestEditMode] = useState(false);
   const [bulkStudentInput, setBulkStudentInput] = useState('');
   const [inlineDateEditKey, setInlineDateEditKey] = useState(null);
@@ -564,7 +1142,7 @@ export default function App() {
   const [selectedReportTests, setSelectedReportTests] = useState({}); // 레포트 시험 선택
   const [newTest, setNewTest] = useState({ 
     title: '', source: '', difficulty: '중', description: '', 
-    date: new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0], 
+    date: getKstToday(), 
     scales: DEFAULT_GRADE_SCALES,
     testType: '중간 테스트',
     mcCount: '', saCount: ''
@@ -583,7 +1161,7 @@ export default function App() {
     // 상태 필터 적용 (과제 기준)
     if (matrixStatusFilter === 'incomplete') {
       filtered = filtered.filter(s => {
-        const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
+        const rel = assignments.filter(a => isItemTarget(a, s.id));
         return rel.some(a => {
           const st = submissions[`${s.id}-${a.id}`]?.status || 'not_started';
           return ['not_started','in_progress','incomplete_red'].includes(st);
@@ -591,7 +1169,7 @@ export default function App() {
       });
     } else if (matrixStatusFilter === 'completed') {
       filtered = filtered.filter(s => {
-        const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
+        const rel = assignments.filter(a => isItemTarget(a, s.id));
         if (rel.length === 0) return false;
         return rel.every(a => {
           const st = submissions[`${s.id}-${a.id}`]?.status || 'not_started';
@@ -605,7 +1183,14 @@ export default function App() {
     else if (matrixSort === 'school') sorted.sort((a, b) => (a.highSchool||'').localeCompare(b.highSchool||'', 'ko') || a.name.localeCompare(b.name, 'ko'));
     else if (matrixSort === 'group') sorted.sort((a, b) => (a.group||'z').localeCompare(b.group||'z') || a.name.localeCompare(b.name, 'ko'));
     return sorted;
-  }, [students, userRole, myStudentId, activeClassFilter, matrixSort, matrixSchoolFilter, matrixGroupFilter]);
+  }, [students, userRole, myStudentId, activeClassFilter, matrixSort, matrixSchoolFilter, matrixGroupFilter, matrixStatusFilter, assignments, submissions]);
+
+  // 출결 탭 전용: 반 필터 + 이름 검색
+  const attStudents = useMemo(() => {
+    let base = attClassFilter === 'all' ? students : students.filter(s => s.classroomId === attClassFilter);
+    if (attSearch.trim()) base = base.filter(s => s.name.includes(attSearch.trim()));
+    return base;
+  }, [students, attClassFilter, attSearch]);
 
   const stats = useMemo(() => {
     if (!students || students.length === 0) return { assign: {}, memo: {}, studentTestAverages: {}, testAverages: {} };
@@ -705,7 +1290,7 @@ export default function App() {
     const inRange = (date) => !date || (date >= fromDate && date <= toDate);
 
     const lines = [];
-    const now = new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
+    const now = getKstToday();
     lines.push(`===== 학원 학습 종합 리포트 =====`);
     lines.push(`생성일: ${now}  |  기간: ${from || '전체'} ~ ${to || '전체'}`);
     lines.push(`학생 수: ${students.length}명\n`);
@@ -716,7 +1301,7 @@ export default function App() {
     rangedAssign.forEach(a => {
       lines.push(`\n• ${a.subject} / ${a.level} — ${a.title}${a.deadline ? ` (마감: ${a.deadline})` : ''}`);
       students.forEach(s => {
-        if (!(a.type === 'all' || (a.targetStudents && a.targetStudents.includes(s.id)))) return;
+        if (!(isItemTarget(a, s.id))) return;
         const sub = submissions[`${s.id}-${a.id}`] || {};
         const status = ASSIGN_STATUS_CONFIG[sub.status || 'not_started']?.label || '-';
         lines.push(`  ${s.name}: ${status}${sub.completionDate ? ` (완료일: ${sub.completionDate})` : ''}`);
@@ -730,7 +1315,7 @@ export default function App() {
     rangedMemo.forEach(m => {
       lines.push(`\n• ${m.subject} / ${m.level} — ${m.title}`);
       students.forEach(s => {
-        if (!(m.type === 'all' || (m.targetStudents && m.targetStudents.includes(s.id)))) return;
+        if (!(isItemTarget(m, s.id))) return;
         const sub = memoSubmissions[`${s.id}-${m.id}`] || {};
         const status = MEMO_STATUS_CONFIG[sub.status || 'not_started']?.label || '-';
         lines.push(`  ${s.name}: ${status}`);
@@ -816,35 +1401,47 @@ export default function App() {
     setAiAnalysis('');
   };
 
-  const requestAiAnalysis = async () => {
-    if (!reportText || aiLoading) return;
-    setAiLoading(true);
-    setAiAnalysis('');
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: `당신은 학원 학습 데이터 분석 전문가입니다. 아래 학습 리포트를 분석하고, 다음 항목에 대해 한국어로 구체적이고 실질적인 개선점을 제안해 주세요:\n\n1. 📚 과제 이행률 및 완료 패턴 분석\n2. 📖 암기 학습 진척도 분석\n3. 📊 성적 추이 및 개선 필요 학생\n4. 🗓️ 출결 패턴 분석\n5. 📈 진도 관리 현황 분석\n6. 💡 종합 개선 제언 (우선순위 3가지)\n\n리포트:\n${reportText}`
-          }]
-        })
+  // --- AI 분석: 프롬프트를 복사해서 Claude에 붙여넣는 방식 ---
+  // (브라우저에서 API를 직접 호출하면 배포 사이트에서는 동작하지 않음)
+  const buildAiPrompt = () => {
+    let body = reportText;
+    if (aiAnonymize) {
+      // 이름 긴 순서로 치환 (예: '김민수'가 '민수'보다 먼저)
+      [...students].sort((x, y) => y.name.length - x.name.length).forEach((st, i) => {
+        if (!st.name) return;
+        body = body.split(st.name).join(`학생${String(students.indexOf(st) + 1).padStart(2, '0')}`);
       });
-      const data = await res.json();
-      const text = (data.content || []).map(b => b.text || '').join('');
-      setAiAnalysis(text || '분석 결과를 받아오지 못했습니다.');
-    } catch (e) {
-      setAiAnalysis('AI 분석 중 오류가 발생했습니다: ' + e.message);
     }
-    setAiLoading(false);
+    return `당신은 학원 학습 데이터 분석 전문가입니다. 아래 학습 리포트를 분석하고, 다음 항목에 대해 한국어로 구체적이고 실질적인 개선점을 제안해 주세요:\n\n1. 📚 과제 이행률 및 완료 패턴 분석\n2. 📖 암기 학습 진척도 분석\n3. 📊 성적 추이 및 개선 필요 학생\n4. 🗓️ 출결 패턴 분석\n5. 📈 진도 관리 현황 분석\n6. 💡 종합 개선 제언 (우선순위 3가지)\n\n리포트:\n${body}`;
+  };
+
+  const copyText = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // 클립보드 API가 막힌 환경 대비
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+      return ok;
+    }
+  };
+
+  const copyAiPrompt = async () => {
+    if (!reportText) return;
+    const ok = await copyText(buildAiPrompt());
+    setAiCopied(ok ? 'ok' : 'fail');
+    setTimeout(() => setAiCopied(''), 4000);
   };
 
     const saveSiteColor = async (color) => {
     if (userRole !== 'master') return;
     setSiteColor(color);
+    setSavedSiteColor(color);
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { siteColor: color }, { merge: true });
     setShowColorPicker(false);
   };
@@ -854,7 +1451,7 @@ export default function App() {
     const key = `${sid}-${itemId}`;
     const coll = category === 'assignment' ? 'submissions' : 'memoSubmissions';
     let date = null;
-    if (nextStatus === 'completed' || nextStatus === 'round_4') date = new Date().toISOString().split('T')[0];
+    if (nextStatus === 'completed' || nextStatus === 'round_4') date = getKstToday();
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, key), { status: nextStatus, completionDate: date }, { merge: true });
     setStatusMenu(null);
   };
@@ -870,8 +1467,9 @@ export default function App() {
         batch.set(doc(db, 'artifacts', appId, 'public', 'data', coll, `${item.studentId}-${as.id}`), { status: nextStatus, completionDate: actualDate }, { merge: true });
       });
     } else {
-      students.forEach(s => {
-        if (item.type === 'all' || (item.targetStudents && item.targetStudents.includes(s.id))) {
+      // 화면에 보이는 학생(반·학교·그룹 필터 적용)만 일괄 처리
+      visibleStudentsFiltered.forEach(s => {
+        if (isItemTarget(item, s.id)) {
           batch.set(doc(db, 'artifacts', appId, 'public', 'data', coll, `${s.id}-${item.id}`), { status: nextStatus, completionDate: actualDate }, { merge: true });
         }
       });
@@ -881,8 +1479,19 @@ export default function App() {
     setBulkDatePopup(null);
   };
 
+  const saveTargetPreset = async (name, ids) => {
+    if (userRole !== 'master') return;
+    const next = [...targetPresets.filter(p => p.name !== name), { id: 'tp' + Date.now(), name, ids }];
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { targetPresets: next }, { merge: true });
+  };
+  const deleteTargetPreset = async (id) => {
+    if (userRole !== 'master') return;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { targetPresets: targetPresets.filter(p => p.id !== id) }, { merge: true });
+  };
+
   const addAssignment = async () => {
     if (userRole !== 'master' || !newAssignment.title.trim()) return;
+    if (newAssignment.type === 'individual' && newAssignment.targetStudents.length === 0) { alert('개별 대상 학생을 1명 이상 선택해 주세요.'); return; }
     const coll = regCategory === 'assignment' ? 'assignments' : 'memoItems';
     const id = (regCategory === 'assignment' ? 'a' : 'm') + Date.now();
     const list = (regCategory === 'assignment' ? assignments : memoItems);
@@ -892,15 +1501,27 @@ export default function App() {
   };
 
   const addTest = async () => {
-    if (userRole !== 'master' || !newTest.title.trim()) return;
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', 't' + Date.now()), { ...newTest });
+    if (userRole !== 'master') return;
+    if (!newTest.title.trim()) { alert('시험 명칭을 입력해 주세요.'); return; }
+    const sortOrder = tests.length > 0 ? Math.max(...tests.map(t => t.sortOrder || 0)) + 1 : 0;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', 't' + Date.now()), { ...newTest, sortOrder });
     setNewTest({
       title: '', source: '', difficulty: '중', description: '',
-      date: new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0],
+      date: getKstToday(),
       scales: DEFAULT_GRADE_SCALES,
       testType: newTest.testType,
       mcCount: '', saCount: '', questions: []
     });
+  };
+
+  // 성적 빠른 입력창 저장: 변경된 학생만 일괄 저장
+  const saveScoreEntry = async (testId, payload) => {
+    if (userRole !== 'master') return;
+    const batch = writeBatch(db);
+    Object.entries(payload).forEach(([sid, data]) => {
+      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'testScores', `${sid}-${testId}`), data, { merge: true });
+    });
+    await batch.commit();
   };
 
   const updateTestDetails = async () => {
@@ -919,8 +1540,19 @@ export default function App() {
 
   const deleteItem = async (coll, id) => {
     if (userRole !== 'master') return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', coll, id));
+    // 항목 삭제 시 연결된 제출/점수 기록도 함께 정리 (고아 데이터 방지)
+    const linked = { assignments: ['submissions', submissions], memoItems: ['memoSubmissions', memoSubmissions], tests: ['testScores', testScores] }[coll];
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', coll, id));
+    if (linked) {
+      const [subColl, subData] = linked;
+      Object.keys(subData).filter(k => k.endsWith(`-${id}`)).forEach(k => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', subColl, k)));
+    }
+    await batch.commit();
   };
+
+  // 삭제 전 확인창 열기 (모든 삭제 공통)
+  const askDelete = (kind, label, onConfirm) => setConfirmDelete({ kind, label, onConfirm });
 
   const moveItem = async (direction, item) => {
     if (userRole !== 'master') return;
@@ -983,11 +1615,11 @@ export default function App() {
   };
 
   const handleBulkAttendanceToggle = async () => {
-    if (userRole !== 'master' || students.length === 0) return;
-    const areAllPresent = students.every(s => attendance[`${s.id}-${currentDate}`]?.status === 'present');
+    if (userRole !== 'master' || attStudents.length === 0) return;
+    const areAllPresent = attStudents.every(s => attendance[`${s.id}-${currentDate}`]?.status === 'present');
     const nextStatus = areAllPresent ? 'none' : 'present';
     const batch = writeBatch(db);
-    students.forEach(s => {
+    attStudents.forEach(s => {
       const key = `${s.id}-${currentDate}`;
       const cur = attendance[key] || { status: 'none', makeup: false };
       batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', key), { ...cur, status: nextStatus }, { merge: true });
@@ -998,8 +1630,9 @@ export default function App() {
   const addPlan = async () => {
     if (userRole !== 'master' || !newPlan.unit.trim()) return;
     const id = 'p' + Date.now();
+    const sameDay = progressPlans.filter(p => p.date === progressSelectedDate);
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', id), {
-      ...newPlan, date: progressSelectedDate, done: false
+      ...newPlan, date: progressSelectedDate, done: false, sortOrder: sameDay.length
     });
     setNewPlan(prev => ({ ...prev, unit: '', memo: '' }));
   };
@@ -1019,6 +1652,59 @@ export default function App() {
   const deletePlan = async (id) => {
     if (userRole !== 'master') return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', id));
+    setSelectedPlanIds(prev => { const n = { ...prev }; delete n[id]; return n; });
+  };
+
+  // 같은 날짜 안에서 순서 이동 (▲▼) — 그 날 전체 순서를 0,1,2… 로 다시 저장
+  const movePlan = async (plan, direction) => {
+    if (userRole !== 'master') return;
+    const dayList = progressPlans.filter(p => p.date === plan.date); // 이미 comparePlans 정렬됨
+    const idx = dayList.findIndex(p => p.id === plan.id);
+    const swap = direction === 'up' ? idx - 1 : idx + 1;
+    if (idx < 0 || swap < 0 || swap >= dayList.length) return;
+    const next = [...dayList];
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    const batch = writeBatch(db);
+    next.forEach((p, i) => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', p.id), { sortOrder: i }, { merge: true }));
+    await batch.commit();
+  };
+
+  // --- 진도 일괄 처리 ---
+  const selectedPlanList = progressPlans.filter(p => selectedPlanIds[p.id]);
+  const togglePlanSelect = (id) => setSelectedPlanIds(prev => { const n = { ...prev }; if (n[id]) delete n[id]; else n[id] = true; return n; });
+  const setPlansSelected = (list, on) => setSelectedPlanIds(prev => { const n = { ...prev }; list.forEach(p => { if (on) n[p.id] = true; else delete n[p.id]; }); return n; });
+
+  const bulkUpdatePlans = async (fields) => {
+    if (userRole !== 'master' || selectedPlanList.length === 0) return;
+    const batch = writeBatch(db);
+    selectedPlanList.forEach(p => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', p.id), fields, { merge: true }));
+    await batch.commit();
+  };
+
+  // 날짜 이동(move) 또는 복사(copy): 대상 날짜의 맨 뒤에 기존 순서대로 붙임
+  const bulkMoveOrCopyPlans = async (targetDate, mode) => {
+    if (userRole !== 'master' || !targetDate || selectedPlanList.length === 0) return;
+    const existing = progressPlans.filter(p => p.date === targetDate && !(mode === 'move' && selectedPlanIds[p.id]));
+    const batch = writeBatch(db);
+    selectedPlanList.forEach((p, i) => {
+      if (mode === 'move') {
+        batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', p.id), { date: targetDate, sortOrder: existing.length + i }, { merge: true });
+      } else {
+        const { id, ...rest } = p;
+        batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', 'p' + Date.now() + '_' + i), { ...rest, date: targetDate, done: false, sortOrder: existing.length + i });
+      }
+    });
+    await batch.commit();
+    if (mode === 'move') setSelectedPlanIds({});
+    setPlanBulkDate('');
+  };
+
+  const bulkDeletePlans = async () => {
+    if (userRole !== 'master' || selectedPlanList.length === 0) return;
+    const batch = writeBatch(db);
+    selectedPlanList.forEach(p => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', p.id)));
+    await batch.commit();
+    setSelectedPlanIds({});
   };
 
     const updateCompletionDate = async (sid, itemId, date, category) => {
@@ -1044,7 +1730,7 @@ export default function App() {
           setUser(u);
           if (u) {
             const basePath = ['artifacts', appId, 'public', 'data'];
-            unsubscribers.push(onSnapshot(doc(db, ...basePath, 'settings', 'config'), snap => { if (snap.exists()) { setSiteTitle(snap.data().siteTitle || 'Science Academy'); if (snap.data().siteColor) setSiteColor(snap.data().siteColor); if (snap.data().subjects) setSubjects(snap.data().subjects); } }));
+            unsubscribers.push(onSnapshot(doc(db, ...basePath, 'settings', 'config'), snap => { if (snap.exists()) { setSiteTitle(snap.data().siteTitle || 'Science Academy'); if (snap.data().siteColor) { setSiteColor(snap.data().siteColor); setSavedSiteColor(snap.data().siteColor); } if (snap.data().subjects) setSubjects(snap.data().subjects); setTargetPresets(snap.data().targetPresets || []); } }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'students')), s => setStudents(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => { if (a.sortOrder != null && b.sortOrder != null) return a.sortOrder - b.sortOrder; if (a.sortOrder != null) return -1; if (b.sortOrder != null) return 1; return a.name.localeCompare(b.name, 'ko'); }))));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'assignments')), s => setAssignments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)))));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'memoItems')), s => setMemoItems(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)))));
@@ -1059,7 +1745,7 @@ export default function App() {
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'studentScores')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data()); setStudentScoreData(d); }));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'classrooms')), s => setClassrooms(s.docs.map(d => ({ id: d.id, ...d.data() })))));
             unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'studentGoals')), s => { const d = {}; s.docs.forEach(x => d[x.id] = x.data()); setStudentGoals(d); }));
-            unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'progressPlans')), s => setProgressPlans(s.docs.map(d => ({ id: d.id, ...d.data() })))));
+            unsubscribers.push(onSnapshot(query(collection(db, ...basePath, 'progressPlans')), s => setProgressPlans(s.docs.map(d => ({ id: d.id, ...d.data() })).sort(comparePlans))));
 
             // [FIX 3] notes 콜백 의존 제거: 인증 완료 후 바로 로딩 해제
             if (!loadingDone) {
@@ -1152,7 +1838,7 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   {isEditingTitle && userRole === 'master' ? (
-                    <BufferedInput value={siteTitle} onSave={saveSiteTitle} className="bg-indigo-900/50 text-white border-none text-xl font-black uppercase tracking-tight px-2 rounded outline-none" autoFocus />
+                    <BufferedInput value={siteTitle} onSave={saveSiteTitle} onBlurNoChange={() => setIsEditingTitle(false)} className="bg-indigo-900/50 text-white border-none text-xl font-black uppercase tracking-tight px-2 rounded outline-none" autoFocus />
                   ) : (
                     <div className="flex items-center gap-2 group cursor-pointer" onClick={() => userRole === 'master' && setIsEditingTitle(true)}>
                       <h1 className="text-xl font-black uppercase tracking-tight text-white leading-none">{siteTitle}</h1>
@@ -1164,7 +1850,7 @@ export default function App() {
                   <span className={`px-2 py-0.5 rounded font-black uppercase border ${userRole === 'master' ? 'bg-blue-500 border-blue-400' : userRole === 'teacher' ? 'bg-amber-500 border-amber-400' : 'bg-emerald-500 border-emerald-400'}`}>
                     {userRole}
                   </span>
-                  <p className="text-white/50 tracking-widest uppercase ml-1">v17.49 master</p>
+                  <p className="text-white/50 tracking-widest uppercase ml-1">v18.0 master</p>
                   {userRole === 'master' && (
                     <div className="relative ml-2">
                       <button onClick={() => setShowColorPicker(v => !v)} className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-[9px] font-black text-white leading-none">
@@ -1188,7 +1874,7 @@ export default function App() {
                               className="flex-1 px-3 py-2 border-2 border-slate-100 rounded-xl font-mono text-sm font-bold text-slate-700 outline-none focus:border-slate-400" placeholder="#3730a3" />
                             <button onClick={()=>saveSiteColor(siteColor)} className="px-3 py-2 bg-slate-800 text-white rounded-xl font-black text-xs hover:bg-slate-700 transition-all">적용</button>
                           </div>
-                          <button onClick={()=>setShowColorPicker(false)} className="w-full mt-3 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all">닫기</button>
+                          <button onClick={()=>{ setSiteColor(savedSiteColor); setShowColorPicker(false); }} className="w-full mt-3 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all">닫기 (적용 안 함)</button>
                         </div>
                       )}
                     </div>
@@ -1209,8 +1895,12 @@ export default function App() {
           {/* 현황 매트릭스 */}
           {(activeTab === 'matrix' || activeTab === 'memorization') && (
             <div className="space-y-6">
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-left">
-                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 leading-none"><Info size={20} /> 상태 가이드</h3>
+              <div className={`bg-white rounded-3xl shadow-sm border border-slate-200 text-left ${guideOpen ? 'p-6' : 'px-6 py-3'}`}>
+                <button onClick={() => setGuideOpen(v => !v)} className={`w-full font-bold text-slate-800 flex items-center gap-2 leading-none ${guideOpen ? 'mb-4' : ''}`}>
+                  <Info size={18} /> 상태 가이드 · 진척도 계산 방식
+                  <ChevronDown size={16} className={`ml-auto text-slate-400 transition-transform ${guideOpen ? 'rotate-180' : ''}`}/>
+                </button>
+                {guideOpen && <>
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-slate-700">
                   {activeTab === 'matrix' ? (
                     [{ l: '시작 전', c: 'bg-slate-50 text-slate-300', i: Circle }, { l: '진행 중', c: 'bg-slate-100 text-slate-900', i: Clock }, { l: '미완료', c: 'bg-red-50 text-red-500', i: AlertCircle }, { l: '완료', c: 'bg-blue-50 text-blue-500', i: CheckCircle2 }, { l: '지각 완료', c: 'bg-orange-50 text-orange-500', i: History }, { l: '해당 없음', c: 'bg-slate-100 text-slate-400', i: MinusCircle }].map((item, i) => (
@@ -1237,6 +1927,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                </>}
               </div>
 
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
@@ -1351,11 +2042,23 @@ export default function App() {
                       const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
                       return `${fmt(mon)} ~ ${fmt(sun)}`;
                     };
-                    const todayKst = new Date(Date.now() + 9*60*60*1000).toISOString().slice(0, 10);
+                    const todayKst = getKstToday();
                     const thisWeekKeyM = getWeekKeyM(todayKst);
 
                     // matrix 탭만 주차 그룹핑
-                    const allItemsM = activeTab === 'matrix' ? assignments : memoItems;
+                    // 학생 로그인: 본인 대상 항목만 / 완료 숨기기: 모바일에도 동일 적용
+                    const allItemsM = (activeTab === 'matrix' ? assignments : memoItems).filter(as => {
+                      if (userRole === 'student' && !isItemTarget(as, myStudentId)) return false;
+                      if (matrixHideDone) {
+                        const targets = visibleStudentsFiltered.filter(s => isItemTarget(as, s.id));
+                        const allDone = targets.length > 0 && targets.every(s => {
+                          const st = (activeTab === 'matrix' ? submissions : memoSubmissions)[`${s.id}-${as.id}`]?.status;
+                          return st === 'completed' || st === 'exempt' || st === 'round_4';
+                        });
+                        if (allDone) return false;
+                      }
+                      return true;
+                    });
                     const weekGroupsM = activeTab === 'matrix' ? (() => {
                       const wm = {};
                       allItemsM.forEach(as => { const wk = getWeekKeyM(as.deadline); if (!wm[wk]) wm[wk] = []; wm[wk].push(as); });
@@ -1435,7 +2138,7 @@ export default function App() {
                               const incompleteCnt = collapsed ? items.reduce((cnt, as) =>
                                 cnt + visibleStudentsFiltered.filter(s => {
                                   const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
-                                  return (as.type === 'all' || as.targetStudents?.includes(s.id)) && st === 'incomplete_red';
+                                  return (isItemTarget(as, s.id)) && st === 'incomplete_red';
                                 }).length, 0) : 0;
                               return (
                                 <button key={wk}
@@ -1460,7 +2163,7 @@ export default function App() {
                             // 진척도 계산 (전체 과제 기준)
                             let pctText, labelText;
                             if (activeTab === 'matrix') {
-                              const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id));
+                              const rel = assignments.filter(a => isItemTarget(a, s.id));
                               const done = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
                               const incomplete = rel.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
                               const effective = done + incomplete;
@@ -1496,7 +2199,7 @@ export default function App() {
                                       <p className={`text-[10px] font-black ${activeTab === 'matrix' ? 'text-indigo-400' : 'text-purple-400'}`}>{labelText}</p>
                                     </div>
                                     {userRole === 'master' && (
-                                      <button onClick={() => { setBulkSelectedDate(new Date().toISOString().split('T')[0]); setBulkSelectedStatus(null); setBulkDatePopup({ item: { id: `bulk-student-${s.id}`, title: `${s.name} 전체 과제`, isBulkStudent: true, studentId: s.id, items: visibleItemsM.filter(a => a.type === 'all' || a.targetStudents?.includes(s.id)) }, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }}
+                                      <button onClick={() => { setBulkSelectedDate(getKstToday()); setBulkSelectedStatus(null); setBulkDatePopup({ item: { id: `bulk-student-${s.id}`, title: `${s.name} 전체 과제`, isBulkStudent: true, studentId: s.id, items: visibleItemsM.filter(a => isItemTarget(a, s.id)) }, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }}
                                         className="p-2 bg-indigo-50 rounded-xl text-indigo-500 hover:bg-indigo-100 transition-colors">
                                         <ListChecks size={16}/>
                                       </button>
@@ -1514,13 +2217,13 @@ export default function App() {
                                 >
                                 <div className={items.length >= 10 ? "grid grid-cols-2 gap-2 pb-1" : "space-y-2 pb-1"}>
                                   {items.map(as => {
-                                    const isTarget = as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id));
+                                    const isTarget = isItemTarget(as, s.id);
                                     const subKey = `${s.id}-${as.id}`;
                                     const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
                                     const status = sub?.status || 'not_started';
                                     const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
                                     const isLate = status === 'completed' && as.deadline && sub?.completionDate > as.deadline;
-                                    const today = new Date().toISOString().split('T')[0];
+                                    const today = getKstToday();
                                     const diff = as.deadline ? Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
                                     const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
                                     const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
@@ -1592,9 +2295,10 @@ export default function App() {
                     const allItems = activeTab === 'matrix' ? assignments : memoItems;
                     // 필터 적용
                     const filteredItems = allItems.filter(as => {
+                      if (userRole === 'student' && !isItemTarget(as, myStudentId)) return false;
                       if (matrixHideDone) {
                         // 모든 대상 학생이 완료했으면 숨김
-                        const targets = visibleStudentsFiltered.filter(s => as.type === 'all' || as.targetStudents?.includes(s.id));
+                        const targets = visibleStudentsFiltered.filter(s => isItemTarget(as, s.id));
                         const allDone = targets.length > 0 && targets.every(s => {
                           const st = (activeTab === 'matrix' ? submissions : memoSubmissions)[`${s.id}-${as.id}`]?.status;
                           return st === 'completed' || st === 'exempt' || st === 'round_4';
@@ -1620,7 +2324,7 @@ export default function App() {
                       const fmt = d => `${d.getMonth()+1}/${d.getDate()}`;
                       return `${fmt(mon)} ~ ${fmt(sun)}`;
                     };
-                    const todayKst = new Date(Date.now() + 9*60*60*1000).toISOString().slice(0, 10);
+                    const todayKst = getKstToday();
                     const thisWeekKey = getWeekKey(todayKst);
 
                     // 주차 그룹핑 (matrix 탭만)
@@ -1641,9 +2345,11 @@ export default function App() {
                       : filteredItems;
 
                     // 과목별 그룹핑 (visibleItems 기준)
-                    const subjectGroups = subjects.map(sub => ({
+                    // 과목 목록에서 삭제된 과목의 항목도 사라지지 않도록 '기타' 그룹으로 함께 표시
+                    const extraSubjects = [...new Set(visibleItems.map(a => a.subject || '기타'))].filter(sub => !subjects.includes(sub));
+                    const subjectGroups = [...subjects, ...extraSubjects].map(sub => ({
                       subject: sub,
-                      items: visibleItems.filter(a => a.subject === sub)
+                      items: visibleItems.filter(a => (a.subject || '기타') === sub)
                     })).filter(g => g.items.length > 0);
 
                     if (filteredItems.length === 0) return (
@@ -1665,7 +2371,7 @@ export default function App() {
                             const incompleteCnt = collapsed ? items.reduce((cnt, as) =>
                               cnt + visibleStudentsFiltered.filter(s => {
                                 const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
-                                return (as.type === 'all' || as.targetStudents?.includes(s.id)) && st === 'incomplete_red';
+                                return (isItemTarget(as, s.id)) && st === 'incomplete_red';
                               }).length, 0) : 0;
                             return (
                               <button key={wk}
@@ -1710,12 +2416,12 @@ export default function App() {
                                     <div className="flex justify-between items-start mb-1 text-left leading-none">
                                       <span className="text-[8px] font-black text-indigo-500 uppercase tracking-tighter leading-none">{as.level}</span>
                                       {userRole === 'master' && (
-                                        <button onClick={(e) => { e.stopPropagation(); setBulkSelectedDate(new Date().toISOString().split('T')[0]); setBulkSelectedStatus(null); setBulkDatePopup({ item: as, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }} className="px-1 py-0.5 bg-white border rounded text-[8px] font-black text-slate-500 hover:bg-slate-50 leading-none">일괄</button>
+                                        <button onClick={(e) => { e.stopPropagation(); setBulkSelectedDate(getKstToday()); setBulkSelectedStatus(null); setBulkDatePopup({ item: as, category: activeTab === 'matrix' ? 'assignment' : 'memorization' }); }} className="px-1 py-0.5 bg-white border rounded text-[8px] font-black text-slate-500 hover:bg-slate-50 leading-none">일괄</button>
                                       )}
                                     </div>
                                     <span className="text-[10px] font-bold text-slate-700 block text-center leading-tight break-words whitespace-normal line-clamp-2">{as.title}</span>
                                     {activeTab === 'matrix' && as.deadline && (() => {
-                                      const today = new Date().toISOString().split('T')[0];
+                                      const today = getKstToday();
                                       const diff = Math.ceil((new Date(as.deadline) - new Date(today)) / (1000 * 60 * 60 * 24));
                                       const isOver = diff < 0;
                                       const isToday = diff === 0;
@@ -1724,7 +2430,7 @@ export default function App() {
                                         const overDays = Math.abs(diff);
                                         const incompleteCnt = visibleStudentsFiltered.filter(s => {
                                           const st = submissions[`${s.id}-${as.id}`]?.status || 'not_started';
-                                          const isTarget = as.type === 'all' || as.targetStudents?.includes(s.id);
+                                          const isTarget = isItemTarget(as, s.id);
                                           return isTarget && ['not_started','in_progress','incomplete_red'].includes(st);
                                         }).length;
                                         if (incompleteCnt === 0) return null;
@@ -1775,7 +2481,7 @@ export default function App() {
                                   const isMatrix = activeTab === 'matrix';
                                   const items = isMatrix ? assignments : memoItems;
                                   const subData = isMatrix ? submissions : memoSubmissions;
-                                  const rel = items.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
+                                  const rel = items.filter(a => isItemTarget(a, s.id));
                                   if (isMatrix) {
                                     // 과제: 완료+미완료만 분모, 나머지 제외
                                     const done = rel.filter(a => subData[`${s.id}-${a.id}`]?.status === 'completed').length;
@@ -1815,10 +2521,10 @@ export default function App() {
                                       const subKey = `${s.id}-${as.id}`;
                                       const sub = (activeTab === 'matrix' ? submissions : memoSubmissions)[subKey];
                                       const status = sub?.status || 'not_started';
-                                      if (!(as.type === 'all' || (as.targetStudents && as.targetStudents.includes(s.id)))) return <td key={as.id} className="p-1 bg-slate-50/30 text-center font-bold text-[9px] text-slate-300 border-l border-slate-100">-</td>;
+                                      if (!(isItemTarget(as, s.id))) return <td key={as.id} className="p-1 bg-slate-50/30 text-center font-bold text-[9px] text-slate-300 border-l border-slate-100">-</td>;
                                       const cfg = activeTab === 'matrix' ? ASSIGN_STATUS_CONFIG[status] : MEMO_STATUS_CONFIG[status];
                                       const isLate = status === 'completed' && as.deadline && sub.completionDate > as.deadline;
-                                      const today = new Date().toISOString().split('T')[0];
+                                      const today = getKstToday();
                                       const overDiff = as.deadline && today > as.deadline ? Math.ceil((new Date(today) - new Date(as.deadline)) / (1000 * 60 * 60 * 24)) : 0;
                                       const isOverdue = overDiff > 0 && ['not_started', 'in_progress', 'incomplete_red'].includes(status);
                                       // 상태별 압축 배경색
@@ -1959,7 +2665,7 @@ export default function App() {
                   tbody tr:nth-child(even) td{background:#f8fafc}
                   @media print{body{padding:10px}tr{page-break-inside:avoid}.section{page-break-inside:avoid}}</style></head><body>
                   <h1>📊 시험 종합 레포트</h1>
-                  <p class="meta">출력일: ${new Date(Date.now()+9*60*60*1000).toISOString().split('T')[0]} · ${chosenTs.length}개 시험 · ${visibleStudentsFiltered.length}명</p>
+                  <p class="meta">출력일: ${getKstToday()} · ${chosenTs.length}개 시험 · ${visibleStudentsFiltered.length}명</p>
                   <div class="section">
                   <div class="section-title">학생별 성적</div>
                   <table><thead><tr>
@@ -2057,7 +2763,6 @@ export default function App() {
                         </select>
                       </div>
                     </div>
-                    <button onClick={addTest} className="w-full bg-orange-500 text-white py-3 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all active:scale-95">등록</button>
                   </div>
                   {/* 테스트 종류 선택 */}
                   <div className="flex gap-2 mb-4">
@@ -2068,92 +2773,11 @@ export default function App() {
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase font-black ml-1 text-slate-400">객관식 문항 수</p>
-                      <div className="relative">
-                        <input type="number" min="0" value={newTest.mcCount} onChange={(e) => {
-                          const cnt = parseInt(e.target.value) || 0;
-                          const existing = (newTest.questions || []).filter(q => q.type === '객관식');
-                          const others = (newTest.questions || []).filter(q => q.type !== '객관식');
-                          const newQs = Array.from({length: cnt}, (_, i) => existing[i] || {type:'객관식', num:i+1, difficulty:'중', unit:'', detail:''});
-                          setNewTest({ ...newTest, mcCount: e.target.value, questions: [...newQs, ...others] });
-                        }} placeholder="0" className="w-full pl-4 pr-16 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-400 transition-all text-slate-800 shadow-sm" />
-                        <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-black text-slate-400 pointer-events-none">문항</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase font-black ml-1 text-slate-400">주관식 문항 수</p>
-                      <div className="relative">
-                        <input type="number" min="0" value={newTest.saCount} onChange={(e) => {
-                          const cnt = parseInt(e.target.value) || 0;
-                          const existing = (newTest.questions || []).filter(q => q.type === '주관식');
-                          const others = (newTest.questions || []).filter(q => q.type !== '주관식');
-                          const newQs = Array.from({length: cnt}, (_, i) => existing[i] || {type:'주관식', num:i+1, difficulty:'중', unit:'', detail:''});
-                          setNewTest({ ...newTest, saCount: e.target.value, questions: [...others, ...newQs] });
-                        }} placeholder="0" className="w-full pl-4 pr-16 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-400 transition-all text-slate-800 shadow-sm" />
-                        <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-black text-slate-400 pointer-events-none">문항</span>
-                      </div>
-                    </div>
+                  <div className="mb-3">
+                    <QuestionEditor test={newTest} onChange={(patch) => setNewTest(prev => ({ ...prev, ...patch }))} />
                   </div>
-                  {/* 등록 폼 문항별 정보 입력 */}
-                  {(newTest.questions || []).length > 0 && (() => {
-                    const mcQs = (newTest.questions || []).filter(q => q.type === '객관식');
-                    const saQs = (newTest.questions || []).filter(q => q.type === '주관식');
-                    const updateNewQ = (type, idx, field, val) => {
-                      const qs = [...(newTest.questions || [])];
-                      const target = qs.filter(q => q.type === type)[idx];
-                      if (!target) return;
-                      qs[qs.indexOf(target)] = { ...target, [field]: val };
-                      setNewTest({ ...newTest, questions: qs });
-                    };
-                    return (
-                      <div className="space-y-3 mb-3">
-                        {[{label:'객관식', list:mcQs, color:'orange'}, {label:'주관식', list:saQs, color:'indigo'}].map(({label, list, color}) =>
-                          list.length > 0 && (
-                            <div key={label}>
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className={`text-[11px] font-black px-2.5 py-1 bg-${color}-100 text-${color}-600 rounded-xl leading-none`}>{label}</span>
-                                <span className="text-[10px] font-bold text-slate-400">문항별 정보</span>
-                              </div>
-                              <div className="space-y-2">
-                                {list.map((q, i) => (
-                                  <div key={i} className={`border border-${color}-100 rounded-2xl overflow-hidden`}>
-                                    <div className={`bg-${color}-50 px-3 py-2 flex items-center gap-2`}>
-                                      <span className={`text-xs font-black text-${color}-700 shrink-0`}>{i+1}번</span>
-                                      <div className="flex gap-1 flex-wrap flex-1">
-                                        {DIFFICULTIES.map(d => (
-                                          <button key={d} type="button" onClick={() => updateNewQ(label, i, 'difficulty', d)}
-                                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition-all leading-none ${q.difficulty === d ? `bg-${color}-500 border-${color}-500 text-white shadow-sm` : `bg-white border-${color}-200 text-${color}-400`}`}>{d}</button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                    <div className="bg-white px-3 py-2.5 space-y-2">
-                                      <div className="flex gap-2">
-                                        <input value={q.unit || ''} onChange={(e) => updateNewQ(label, i, 'unit', e.target.value)}
-                                          placeholder="출제 단원"
-                                          className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-slate-400 text-slate-700 transition-all" />
-                                        <div className="relative shrink-0 w-24">
-                                          <input type="number" min="0" step="any" value={q.points ?? ''} onChange={(e) => updateNewQ(label, i, 'points', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                                            placeholder="0"
-                                            className="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-slate-400 text-slate-700 transition-all" />
-                                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 pointer-events-none">점</span>
-                                        </div>
-                                      </div>
-                                      <input value={q.detail || ''} onChange={(e) => updateNewQ(label, i, 'detail', e.target.value)}
-                                        placeholder="세부 정보 (오답 포인트, 출제 의도 등)"
-                                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:bg-white focus:border-slate-400 text-slate-600 transition-all" />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    );
-                  })()}
                   <BufferedTextarea value={newTest.description} onSave={(v) => setNewTest({ ...newTest, description: v })} placeholder="전체 범위 및 메모..." className="w-full h-20 p-4 border rounded-2xl font-medium text-sm outline-none bg-slate-50 focus:bg-white transition-all text-slate-700 shadow-inner" />
+                  <button onClick={addTest} className="w-full mt-3 bg-orange-500 text-white py-3.5 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all active:scale-95">시험 등록</button>
                 </div>
               )}
               {/* ── 중간 테스트 섹션 ── */}
@@ -2172,6 +2796,23 @@ export default function App() {
                       </div>
                       <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
                     </button>
+                    {/* 성적 빠른 입력 버튼 (master) */}
+                    {userRole === 'master' && !collapsed && (
+                      <div className="px-4 md:px-6 py-3 border-t border-slate-100 bg-orange-50/40 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-black text-slate-400 mr-1">✏️ 성적 입력</span>
+                        {mainTests.map(t => {
+                          const filled = visibleStudentsFiltered.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
+                          const full = filled === visibleStudentsFiltered.length && filled > 0;
+                          return (
+                            <button key={t.id} onClick={() => setScoreEntryTest(t)}
+                              className={`px-3 py-1.5 rounded-xl text-[11px] font-black border-2 transition-all flex items-center gap-1.5 ${full ? 'bg-white border-emerald-200 text-emerald-600 hover:border-emerald-400' : 'bg-white border-orange-200 text-orange-600 hover:border-orange-400'}`}>
+                              {t.title}
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-orange-100'}`}>{filled}/{visibleStudentsFiltered.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     {!collapsed && (
                       <>
                         {/* 모바일 카드형 */}
@@ -2305,7 +2946,7 @@ export default function App() {
                                         </div>
                                         <div className="flex gap-1">
                                           <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-orange-100 rounded text-orange-400"><Search size={13} /></button>
-                                          {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200"><Trash2 size={13} /></button>}
+                                          {userRole === 'master' && <button onClick={() => askDelete('시험', t.title, () => deleteItem('tests', t.id))} className="p-1 hover:bg-red-50 rounded text-red-200"><Trash2 size={13} /></button>}
                                         </div>
                                       </div>
                                       <span className="text-xs font-bold text-slate-700 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
@@ -2479,6 +3120,23 @@ export default function App() {
                       </div>
                       <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`} />
                     </button>
+                    {/* 성적 빠른 입력 버튼 (master) */}
+                    {userRole === 'master' && !collapsed && (
+                      <div className="px-4 md:px-6 py-3 border-t border-slate-100 bg-slate-50/40 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-black text-slate-400 mr-1">✏️ 성적 입력</span>
+                        {miniTests.map(t => {
+                          const filled = visibleStudentsFiltered.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
+                          const full = filled === visibleStudentsFiltered.length && filled > 0;
+                          return (
+                            <button key={t.id} onClick={() => setScoreEntryTest(t)}
+                              className={`px-3 py-1.5 rounded-xl text-[11px] font-black border-2 transition-all flex items-center gap-1.5 ${full ? 'bg-white border-emerald-200 text-emerald-600 hover:border-emerald-400' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'}`}>
+                              {t.title}
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-slate-100'}`}>{filled}/{visibleStudentsFiltered.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     {!collapsed && (
                       <>
                         {/* 모바일 카드형 */}
@@ -2584,7 +3242,7 @@ export default function App() {
                                         <span className="text-[9px] font-black text-slate-400">{t.date}</span>
                                         <div className="flex gap-1">
                                           <button onClick={() => setSelectedTest(t)} className="p-1 hover:bg-slate-200 rounded text-slate-400"><Search size={13} /></button>
-                                          {userRole === 'master' && <button onClick={() => deleteItem('tests', t.id)} className="p-1 hover:bg-red-50 rounded text-red-200"><Trash2 size={13} /></button>}
+                                          {userRole === 'master' && <button onClick={() => askDelete('시험', t.title, () => deleteItem('tests', t.id))} className="p-1 hover:bg-red-50 rounded text-red-200"><Trash2 size={13} /></button>}
                                         </div>
                                       </div>
                                       <span className="text-xs font-bold text-slate-600 block w-40 text-left leading-tight break-words whitespace-normal">{t.title}</span>
@@ -2752,6 +3410,24 @@ export default function App() {
                   <input type="date" value={currentDate} onChange={(e) => setCurrentDate(e.target.value)} className="flex-1 md:flex-none px-6 py-3 rounded-2xl border font-bold outline-none shadow-sm focus:border-indigo-500 transition-all text-slate-700" />
                 </div>
               </div>
+              {/* 출결 필터: 반 + 이름 검색 */}
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-2">
+                {classrooms.length > 0 && (
+                  <div className="flex gap-1 flex-wrap">
+                    {[{ id: 'all', name: '전체' }, ...classrooms].map(c => (
+                      <button key={c.id} onClick={() => setAttClassFilter(c.id)}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black border transition-all ${attClassFilter === c.id ? 'text-white border-transparent shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                        style={attClassFilter === c.id ? {background:'var(--sc)'} : {}}>{c.name}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="relative flex-1 min-w-[160px]">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"/>
+                  <input value={attSearch} onChange={e => setAttSearch(e.target.value)} placeholder="학생 이름 검색..."
+                    className="w-full pl-8 pr-3 py-2 rounded-xl border bg-slate-50 text-sm font-bold outline-none focus:border-slate-400 text-slate-700" />
+                </div>
+                <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{attStudents.length}명</span>
+              </div>
               {/* 진도 달력 미니 뷰 */}
               <div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><TrendingUp size={11} className="text-teal-500"/> 진도 수업 달력</p>
@@ -2759,7 +3435,7 @@ export default function App() {
                   progressPlans={progressPlans}
                   progressCalMonth={progressCalMonth}
                   setProgressCalMonth={setProgressCalMonth}
-                  kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                  kstToday={getKstToday()}
                   attendance={attendance}
                   students={students}
                   makeupDates={makeupDates}
@@ -2786,7 +3462,8 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                {students.map(s => {
+                {attStudents.length === 0 && <div className="p-8 text-center text-slate-400 font-bold text-sm">조건에 맞는 학생이 없습니다.</div>}
+                {attStudents.map(s => {
                   const att = attendance[`${s.id}-${currentDate}`] || { status: 'none', makeup: false };
                   const note = attendanceNotes[`${s.id}-${currentDate}`] || '';
                   const mDateValue = makeupDates[`${s.id}-${currentDate}`] || '';
@@ -3246,7 +3923,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                ))})()}
+                ))}
               </div>
             </div>
           )}
@@ -3254,7 +3931,7 @@ export default function App() {
           {/* 진도 관리 탭 */}
           {/* 진도 관리 탭 */}
           {activeTab === 'progress' && userRole !== 'student' && (() => {  /* master/teacher */
-            const kstToday = new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
+            const kstToday = getKstToday();
             const [calYear, calMonthIdx] = progressCalMonth.split('-').map(Number);
             const firstDay = new Date(calYear, calMonthIdx - 1, 1).getDay();
             const daysInMonth = new Date(calYear, calMonthIdx, 0).getDate();
@@ -3440,6 +4117,16 @@ export default function App() {
                         </span>
                       )}
                     </div>
+                    {userRole === 'master' && (plansByDate[progressSelectedDate] || []).length > 0 && (() => {
+                      const dayList = plansByDate[progressSelectedDate] || [];
+                      const allSel = dayList.every(p => selectedPlanIds[p.id]);
+                      return (
+                        <button onClick={() => setPlansSelected(dayList, !allSel)}
+                          className="px-3 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 text-slate-500 bg-white hover:bg-slate-50">
+                          {allSel ? '이 날 선택 해제' : '이 날 전체 선택'}
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {/* 계획 등록 폼 (master only) */}
@@ -3479,8 +4166,8 @@ export default function App() {
                     {(plansByDate[progressSelectedDate] || []).length === 0 ? (
                       <div className="p-5 text-center text-slate-400 font-bold text-sm">이 날의 수업 계획이 없습니다.</div>
                     ) : (
-                      (plansByDate[progressSelectedDate] || []).map(plan => (
-                        <div key={plan.id} className="px-6 py-4 group hover:bg-slate-50 transition-all">
+                      (plansByDate[progressSelectedDate] || []).map((plan, planIdx, dayArr) => (
+                        <div key={plan.id} className={`px-4 md:px-6 py-4 group transition-all ${selectedPlanIds[plan.id] ? 'bg-indigo-50/60' : 'hover:bg-slate-50'}`}>
                           {editPlanId === plan.id ? (
                             <div className="space-y-3 animate-in slide-in-from-top-2">
                               {/* 수업 종류 */}
@@ -3508,8 +4195,13 @@ export default function App() {
                               </div>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-3">
-                              {/* 체크박스 */}
+                            <div className="flex items-center gap-2 md:gap-3">
+                              {/* 일괄 선택 체크 (master) */}
+                              {userRole === 'master' && (
+                                <input type="checkbox" checked={!!selectedPlanIds[plan.id]} onChange={() => togglePlanSelect(plan.id)}
+                                  title="일괄 수정·삭제용 선택" className="w-4 h-4 accent-indigo-600 shrink-0 cursor-pointer" />
+                              )}
+                              {/* 완료 체크박스 */}
                               <button onClick={() => togglePlanDone(plan)}
                                 disabled={userRole !== 'master'}
                                 className={`shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${plan.done ? 'bg-teal-500 border-teal-500' : 'border-slate-300 hover:border-teal-400 bg-white'} ${userRole !== 'master' ? 'cursor-default' : 'cursor-pointer'}`}>
@@ -3523,9 +4215,16 @@ export default function App() {
                                 {plan.memo && <p className="text-xs text-slate-400 font-medium italic mt-0.5 leading-none">{plan.memo}</p>}
                               </div>
                               {userRole === 'master' && (
-                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                <div className="flex gap-1 md:opacity-0 md:group-hover:opacity-100 transition-all shrink-0">
+                                  {/* 같은 날짜 안 순서 변경 */}
+                                  <div className="flex flex-col gap-0.5">
+                                    <button onClick={() => movePlan(plan, 'up')} disabled={planIdx === 0} title="위로"
+                                      className="p-0.5 text-slate-400 bg-slate-50 hover:bg-slate-200 rounded-md disabled:opacity-20"><ChevronDown size={12} className="rotate-180"/></button>
+                                    <button onClick={() => movePlan(plan, 'down')} disabled={planIdx === dayArr.length - 1} title="아래로"
+                                      className="p-0.5 text-slate-400 bg-slate-50 hover:bg-slate-200 rounded-md disabled:opacity-20"><ChevronDown size={12}/></button>
+                                  </div>
                                   <button onClick={() => { setEditPlanId(plan.id); setEditPlanData({ ...plan, lessonType: plan.lessonType || '진도' }); }} className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"><Edit2 size={13} /></button>
-                                  <button onClick={() => deletePlan(plan.id)} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all"><Trash2 size={13} /></button>
+                                  <button onClick={() => askDelete('진도 계획', plan.unit, () => deletePlan(plan.id))} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all"><Trash2 size={13} /></button>
                                 </div>
                               )}
                             </div>
@@ -3535,6 +4234,103 @@ export default function App() {
                     )}
                   </div>
                 </div>
+
+                {/* ── 월간 목록 (여러 날짜 한꺼번에 선택) ── */}
+                {userRole === 'master' && (() => {
+                  const monthPlans = progressPlans.filter(p => (p.date || '').startsWith(progressCalMonth));
+                  const byDate = monthPlans.reduce((acc, p) => { (acc[p.date] = acc[p.date] || []).push(p); return acc; }, {});
+                  const dates = Object.keys(byDate).sort();
+                  const allSel = monthPlans.length > 0 && monthPlans.every(p => selectedPlanIds[p.id]);
+                  return (
+                    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                      <button onClick={() => setPlanListOpen(v => !v)} className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-all">
+                        <span className="font-black text-slate-800 flex items-center gap-2"><ListChecks size={16} className="text-indigo-500"/> {calMonthIdx}월 전체 목록 <span className="text-[10px] font-bold text-slate-400">여러 날짜 한꺼번에 선택</span></span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{monthPlans.length}건</span>
+                          <ChevronDown size={16} className={`text-slate-400 transition-transform ${planListOpen ? 'rotate-180' : ''}`}/>
+                        </span>
+                      </button>
+                      {planListOpen && (
+                        <div className="border-t border-slate-100">
+                          {monthPlans.length === 0 ? (
+                            <div className="p-5 text-center text-slate-400 font-bold text-sm">이 달의 수업 계획이 없습니다.</div>
+                          ) : (
+                            <>
+                              <div className="px-6 py-2 bg-slate-50 flex items-center gap-2">
+                                <button onClick={() => setPlansSelected(monthPlans, !allSel)} className="px-3 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 text-slate-500 bg-white hover:bg-slate-100">
+                                  {allSel ? `${calMonthIdx}월 선택 해제` : `${calMonthIdx}월 전체 선택`}
+                                </button>
+                              </div>
+                              <div className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
+                                {dates.map(d => {
+                                  const list = byDate[d];
+                                  const daySel = list.every(p => selectedPlanIds[p.id]);
+                                  return (
+                                    <div key={d} className="px-4 md:px-6 py-2.5">
+                                      <label className="flex items-center gap-2 mb-1.5 cursor-pointer select-none">
+                                        <input type="checkbox" checked={daySel} onChange={() => setPlansSelected(list, !daySel)} className="w-4 h-4 accent-indigo-600" />
+                                        <span className="text-[11px] font-black text-slate-500">{d} ({dayLabels[new Date(d).getDay()]})</span>
+                                      </label>
+                                      <div className="space-y-1 pl-6">
+                                        {list.map(p => {
+                                          const lt = LESSON_TYPES.find(l => l.id === (p.lessonType || '진도')) || LESSON_TYPES[0];
+                                          return (
+                                            <label key={p.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-xl cursor-pointer select-none ${selectedPlanIds[p.id] ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+                                              <input type="checkbox" checked={!!selectedPlanIds[p.id]} onChange={() => togglePlanSelect(p.id)} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${lt.light}`}>{p.lessonType || '진도'}</span>
+                                              <span className="text-[10px] font-black text-slate-500 shrink-0">{p.subject}</span>
+                                              <span className={`text-xs font-black flex-1 min-w-0 truncate ${p.done ? 'line-through text-slate-400' : 'text-slate-700'}`}>{p.unit}</span>
+                                              {p.done && <CheckCircle2 size={12} className="text-teal-500 shrink-0"/>}
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── 진도 일괄 처리 바 (선택 시 하단 고정) ── */}
+                {userRole === 'master' && selectedPlanList.length > 0 && (
+                  <div className="sticky bottom-4 z-30 bg-slate-900 text-white rounded-3xl shadow-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-sm">{selectedPlanList.length}개 선택됨</span>
+                      <button onClick={() => setSelectedPlanIds({})} className="text-[11px] font-black text-white/60 hover:text-white">선택 해제</button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button onClick={() => bulkUpdatePlans({ done: true })} className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-teal-500 hover:bg-teal-600">완료 처리</button>
+                      <button onClick={() => bulkUpdatePlans({ done: false })} className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-white/15 hover:bg-white/25">미완료로</button>
+                      <select value="" onChange={e => { if (e.target.value) bulkUpdatePlans({ lessonType: e.target.value }); }}
+                        className="px-2 py-1.5 rounded-xl text-[11px] font-black bg-white/15 text-white outline-none">
+                        <option value="" className="text-slate-800">수업 종류 변경…</option>
+                        {LESSON_TYPES.map(lt => <option key={lt.id} value={lt.id} className="text-slate-800">{lt.id}</option>)}
+                      </select>
+                      <select value="" onChange={e => { if (e.target.value) bulkUpdatePlans({ subject: e.target.value }); }}
+                        className="px-2 py-1.5 rounded-xl text-[11px] font-black bg-white/15 text-white outline-none">
+                        <option value="" className="text-slate-800">과목 변경…</option>
+                        {subjects.map(sub => <option key={sub} value={sub} className="text-slate-800">{sub}</option>)}
+                      </select>
+                      <button onClick={() => askDelete('진도 계획', `선택한 ${selectedPlanList.length}개`, bulkDeletePlans)}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-red-500 hover:bg-red-600 flex items-center gap-1"><Trash2 size={12}/> 삭제</button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-black text-white/60">날짜</span>
+                      <input type="date" value={planBulkDate} onChange={e => setPlanBulkDate(e.target.value)}
+                        className="px-2 py-1.5 rounded-xl text-[11px] font-black bg-white text-slate-800 outline-none" />
+                      <button disabled={!planBulkDate} onClick={() => bulkMoveOrCopyPlans(planBulkDate, 'move')}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-indigo-500 hover:bg-indigo-600 disabled:opacity-30">로 이동</button>
+                      <button disabled={!planBulkDate} onClick={() => bulkMoveOrCopyPlans(planBulkDate, 'copy')}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-white/15 hover:bg-white/25 disabled:opacity-30">로 복사</button>
+                    </div>
+                  </div>
+                )}
 
               </div>
             );
@@ -3605,7 +4401,7 @@ export default function App() {
                   progressPlans={progressPlans}
                   progressCalMonth={progressCalMonth}
                   setProgressCalMonth={setProgressCalMonth}
-                  kstToday={new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0]}
+                  kstToday={getKstToday()}
                   attendance={attendance}
                   students={students}
                   makeupDates={makeupDates}
@@ -3642,17 +4438,17 @@ export default function App() {
                 const rangedTests = tests.filter(t => inRange(t.date));
                 const rangedPlans = progressPlans.filter(p => inRange(p.date));
                 const jinDoPlans = rangedPlans.filter(p => !p.lessonType || p.lessonType === '진도');
-                const now = new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
+                const now = getKstToday();
 
                 // 학생별 요약 데이터
                 const studentSummary = students.map(s => {
-                  const relAssign = rangedAssign.filter(a => a.type === 'all' || (a.targetStudents?.includes(s.id)));
+                  const relAssign = rangedAssign.filter(a => isItemTarget(a, s.id));
                   const doneA = relAssign.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
                   const incompleteA = relAssign.filter(a => submissions[`${s.id}-${a.id}`]?.status === 'incomplete_red').length;
                   const effectiveA = doneA + incompleteA; // 과제현황표 동일: 완료+미완료만 분모
                   const assignPct = effectiveA > 0 ? Math.round(doneA / effectiveA * 100) : null;
 
-                  const relMemo = memoItems.filter(m => m.type === 'all' || (m.targetStudents?.includes(s.id)));
+                  const relMemo = memoItems.filter(m => isItemTarget(m, s.id));
                   const topMemo = relMemo.reduce((best, m) => {
                     const st = memoSubmissions[`${s.id}-${m.id}`]?.status || 'not_started';
                     const idx = MEMO_STATUS_ORDER.indexOf(st);
@@ -3667,7 +4463,8 @@ export default function App() {
                   const absent = attKeys.filter(k => attendance[k]?.status === 'absent').length;
                   const late = attKeys.filter(k => attendance[k]?.status === 'late').length;
 
-                  const testScoreList = rangedTests.map(t => testScores[`${s.id}-${t.id}`]?.score).filter(v => v !== null && v !== undefined);
+                  // 성적표와 동일 기준: 중간 테스트만, 결시·비대상 제외
+                  const testScoreList = rangedTests.filter(t => !t.testType || t.testType === '중간 테스트').map(t => { const r = testScores[`${s.id}-${t.id}`]; return r?.absent ? null : r?.score; }).filter(v => v !== null && v !== undefined);
                   const avgScore = testScoreList.length ? (testScoreList.reduce((a,b)=>a+b,0)/testScoreList.length).toFixed(1) : null;
 
                   return { s, assignPct, doneA, effectiveA, topMemo, present, absent, late, avgScore };
@@ -3675,7 +4472,7 @@ export default function App() {
 
                 // 과제별 완료율
                 const assignStats = rangedAssign.map(a => {
-                  const rel = students.filter(s => a.type === 'all' || (a.targetStudents?.includes(s.id)));
+                  const rel = students.filter(s => isItemTarget(a, s.id));
                   const exempt = rel.filter(s => submissions[`${s.id}-${a.id}`]?.status === 'exempt').length;
                   const effective = rel.length - exempt;
                   const done = rel.filter(s => submissions[`${s.id}-${a.id}`]?.status === 'completed').length;
@@ -3897,7 +4694,7 @@ export default function App() {
                                                 <tr key={s.id} className={idx%2===0?'bg-white':'bg-slate-50/30'}>
                                                   <td className="px-4 py-2.5 font-black text-slate-800 sticky left-0 bg-white">{s.name}</td>
                                                   {dayDeadlineAssigns.map(a => {
-                                                    const isTarget = a.type === 'all' || a.targetStudents?.includes(s.id);
+                                                    const isTarget = isItemTarget(a, s.id);
                                                     if (!isTarget) return <td key={a.id} className="px-3 py-2.5 text-center"><span className="text-slate-200 text-[10px] font-bold">-</span></td>;
                                                     const sub = submissions[`${s.id}-${a.id}`] || {};
                                                     const status = sub.status || 'not_started';
@@ -4070,7 +4867,7 @@ export default function App() {
                                   <th className="px-5 py-3 text-left sticky left-0 bg-slate-50 z-10">이름</th>
                                   <th className="px-4 py-3 text-center">과제 완료율</th>
                                   <th className="px-4 py-3 text-center">최고 암기</th>
-                                  <th className="px-4 py-3 text-center">시험 평균</th>
+                                  <th className="px-4 py-3 text-center">중간평균</th>
                                   <th className="px-4 py-3 text-center">출석</th>
                                   <th className="px-4 py-3 text-center">결석</th>
                                 </tr>
@@ -4483,7 +5280,8 @@ export default function App() {
                                 <tbody>
                                   {students.map((s, idx) => {
                                     const scores = rangedTests.map(t=>testScores[`${s.id}-${t.id}`]?.score);
-                                    const valid = scores.filter(v=>v!=null);
+                                    // 평균: 중간 테스트만, 결시·비대상 제외 (성적표와 동일)
+                                    const valid = rangedTests.filter(t => !t.testType || t.testType === '중간 테스트').map(t => { const r = testScores[`${s.id}-${t.id}`]; return r?.absent ? null : r?.score; }).filter(v=>v!=null);
                                     const avg = valid.length ? (valid.reduce((a,b)=>a+b,0)/valid.length).toFixed(1) : null;
                                     return (
                                       <tr key={s.id} className={idx%2===0?'bg-white':'bg-slate-50'}>
@@ -4638,45 +5436,44 @@ export default function App() {
                 );
               })()}
 
-              {/* AI 분석 */}
+              {/* AI 분석 - Claude에 복사·붙여넣기 방식 */}
               {reportGenerated && userRole === 'master' && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <p className="font-black text-slate-800 flex items-center gap-2 leading-none"><Bot size={16} className="text-violet-500" /> AI 학습 분석</p>
-                    {aiAnalysis && (
-                      <button onClick={requestAiAnalysis} disabled={aiLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-xl font-bold text-xs transition-all">
-                        <RefreshCw size={12} className={aiLoading ? 'animate-spin' : ''} /> 재분석
+                    <p className="font-black text-slate-800 flex items-center gap-2 leading-none"><Bot size={16} className="text-violet-500" /> AI 학습 분석 (Claude)</p>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="flex items-start gap-3 bg-violet-50 border border-violet-100 rounded-2xl p-4">
+                      <Sparkles size={18} className="text-violet-500 shrink-0 mt-0.5"/>
+                      <div className="text-xs font-bold text-violet-700 leading-relaxed space-y-0.5">
+                        <p>① <b>분석 요청문 복사</b>를 누르면 리포트 + 분석 지시문이 복사됩니다.</p>
+                        <p>② <b>Claude 열기</b> → 대화창에 붙여넣기(Ctrl+V / 길게 눌러 붙여넣기) → 전송</p>
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+                      <input type="checkbox" checked={aiAnonymize} onChange={e => setAiAnonymize(e.target.checked)} className="w-4 h-4 accent-violet-600" />
+                      <span className="text-xs font-black text-slate-600">학생 이름을 '학생01, 학생02…'로 바꿔서 복사</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button onClick={copyAiPrompt}
+                        className="py-4 text-white rounded-2xl font-black shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                        style={{background:'var(--sc)'}}>
+                        {aiCopied === 'ok' ? <><CheckCircle2 size={18}/> 복사됨!</> : <><Copy size={18}/> 분석 요청문 복사</>}
                       </button>
+                      <a href="https://claude.ai/new" target="_blank" rel="noopener noreferrer"
+                        className="py-4 bg-violet-600 hover:bg-violet-700 text-white rounded-2xl font-black shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <Bot size={18}/> Claude 열기
+                      </a>
+                    </div>
+                    {aiCopied === 'fail' && <p className="text-xs font-bold text-red-500">자동 복사가 막혀 있어요. 아래 미리보기를 펼쳐 직접 전체 선택 후 복사해 주세요.</p>}
+                    <button onClick={() => setAiPreviewOpen(v => !v)} className="text-[11px] font-black text-slate-400 hover:text-slate-600 flex items-center gap-1">
+                      <ChevronDown size={12} className={`transition-transform ${aiPreviewOpen ? 'rotate-180' : ''}`}/> 복사될 내용 미리보기
+                    </button>
+                    {aiPreviewOpen && (
+                      <textarea readOnly value={buildAiPrompt()} onFocus={e => e.target.select()}
+                        className="w-full h-64 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-600 outline-none resize-y select-text" />
                     )}
                   </div>
-                  {!aiAnalysis && !aiLoading && (
-                    <div className="p-8 text-center">
-                      <div className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-4" style={{background:'var(--sc-faint)'}}>
-                        <Sparkles size={28} style={{color:'var(--sc)'}} />
-                      </div>
-                      <p className="text-slate-600 font-bold mb-2">AI가 리포트를 분석하고 개선점을 제안합니다</p>
-                      <p className="text-slate-400 text-sm font-medium mb-6">과제·암기·성적·출결·진도 데이터를 종합적으로 분석합니다</p>
-                      <button onClick={requestAiAnalysis}
-                        className="px-8 py-4 text-white rounded-2xl font-black shadow-lg transition-all active:scale-95 flex items-center gap-2 mx-auto"
-                        style={{background:'var(--sc)'}}>
-                        <Sparkles size={18} /> AI 분석 요청
-                      </button>
-                    </div>
-                  )}
-                  {aiLoading && (
-                    <div className="p-12 text-center">
-                      <div className="flex items-center justify-center gap-3 text-slate-500 font-bold">
-                        <Loader2 size={22} className="animate-spin" style={{color:'var(--sc)'}} />
-                        <span>AI가 데이터를 분석하고 있습니다...</span>
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis && !aiLoading && (
-                    <div className="p-6">
-                      <div className="prose prose-sm max-w-none text-slate-700 font-medium leading-relaxed whitespace-pre-wrap text-sm select-text">{aiAnalysis}</div>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -4746,76 +5543,15 @@ export default function App() {
                           <button onClick={() => setNewAssignment({ ...newAssignment, type: 'all', targetStudents: [] })} className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 leading-none ${newAssignment.type === 'all' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-100 text-slate-400'}`}>전체</button>
                           <button onClick={() => setNewAssignment({ ...newAssignment, type: 'individual' })} className={`flex-1 py-2 rounded-xl text-xs font-black border-2 leading-none ${newAssignment.type === 'individual' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-100 text-slate-400'}`}>개별</button>
                         </div>
-                        {newAssignment.type === 'individual' && (() => {
-                          const groups = ['A','B','C','D','E'].filter(g => students.some(s => s.group === g));
-                          const toggleGroup = (g) => {
-                            const inGroup = students.filter(s => s.group === g).map(s => s.id);
-                            const allSelected = inGroup.every(id => newAssignment.targetStudents.includes(id));
-                            let next = [...newAssignment.targetStudents];
-                            if (allSelected) next = next.filter(id => !inGroup.includes(id));
-                            else inGroup.forEach(id => { if (!next.includes(id)) next.push(id); });
-                            setNewAssignment({ ...newAssignment, targetStudents: next });
-                          };
-                          const toggleAll = () => {
-                            const allIds = students.map(s => s.id);
-                            const allSelected = allIds.every(id => newAssignment.targetStudents.includes(id));
-                            setNewAssignment({ ...newAssignment, targetStudents: allSelected ? [] : allIds });
-                          };
-                          return (
-                            <div className="space-y-2">
-                              {/* 그룹 빠른선택 버튼 */}
-                              {groups.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  <button onClick={toggleAll}
-                                    className="px-2.5 py-1.5 rounded-lg text-[10px] font-black border-2 border-slate-200 text-slate-500 bg-white hover:border-indigo-300 hover:text-indigo-600 transition-all leading-none">
-                                    전체선택
-                                  </button>
-                                  {groups.map(g => {
-                                    const inGroup = students.filter(s => s.group === g).map(s => s.id);
-                                    const allSel = inGroup.every(id => newAssignment.targetStudents.includes(id));
-                                    return (
-                                      <button key={g} onClick={() => toggleGroup(g)}
-                                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border-2 transition-all leading-none ${allSel ? 'bg-amber-500 border-amber-500 text-white' : 'border-amber-200 text-amber-600 bg-white hover:border-amber-400'}`}>
-                                        그룹 {g} ({inGroup.length}명)
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              {/* 학생 개별 선택 그리드 */}
-                              <div className="p-3 bg-slate-50 rounded-2xl border shadow-inner">
-                                <div className="grid grid-cols-2 gap-1.5">
-                                  {students.map(s => {
-                                    const checked = newAssignment.targetStudents.includes(s.id);
-                                    return (
-                                      <button key={s.id}
-                                        onClick={() => {
-                                          const cur = [...newAssignment.targetStudents];
-                                          if (checked) cur.splice(cur.indexOf(s.id), 1);
-                                          else cur.push(s.id);
-                                          setNewAssignment({ ...newAssignment, targetStudents: cur });
-                                        }}
-                                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left transition-all ${checked ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
-                                        <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 ${checked ? 'bg-white border-white' : 'border-slate-300'}`}>
-                                          {checked && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <p className="text-xs font-black truncate leading-none">{s.name}</p>
-                                          {s.group && <p className={`text-[9px] font-bold leading-none mt-0.5 ${checked ? 'text-indigo-200' : 'text-amber-500'}`}>그룹 {s.group}</p>}
-                                        </div>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                                {newAssignment.targetStudents.length > 0 && (
-                                  <p className="text-center text-[10px] font-black text-indigo-600 mt-2">{newAssignment.targetStudents.length}명 선택됨</p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
                       </div>
                     </div>
+                    {newAssignment.type === 'individual' && (
+                      <TargetStudentPicker students={students} classrooms={classrooms}
+                        selected={newAssignment.targetStudents}
+                        onChange={(ids) => setNewAssignment(prev => ({ ...prev, targetStudents: ids }))}
+                        presets={targetPresets} onSavePreset={saveTargetPreset} onDeletePreset={deleteTargetPreset}
+                        pastItems={[...assignments, ...memoItems]} />
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
                       <div className="text-left leading-none"><p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><FileText size={12} /> 4. 명칭</p><BufferedInput value={newAssignment.title} onSave={(v) => setNewAssignment({ ...newAssignment, title: v })} placeholder="제목..." className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:ring-2 focus:ring-indigo-100 text-slate-800 shadow-sm transition-all leading-none" /></div>
                       <div className="text-left leading-none"><p className="text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1 text-left leading-none"><Calendar size={12} /> 5. 마감기한</p><input type="date" value={newAssignment.deadline} onChange={(e) => setNewAssignment({ ...newAssignment, deadline: e.target.value })} className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-indigo-500 text-slate-800 shadow-sm transition-all leading-none" /></div>
@@ -4876,50 +5612,11 @@ export default function App() {
                             )}
                           </div>
                           {editItemData.type === 'individual' && (
-                            <div className="mt-2 p-4 bg-slate-50 rounded-2xl border border-slate-200 shadow-inner">
-                              <div className="flex items-center justify-between mb-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학생 선택</p>
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => setEditItemData({ ...editItemData, targetStudents: students.map(s => s.id) })}
-                                    className="px-2 py-1 bg-indigo-100 text-indigo-600 rounded-lg text-[9px] font-black hover:bg-indigo-200 transition-all"
-                                  >
-                                    전체 선택
-                                  </button>
-                                  <button
-                                    onClick={() => setEditItemData({ ...editItemData, targetStudents: [] })}
-                                    className="px-2 py-1 bg-slate-200 text-slate-500 rounded-lg text-[9px] font-black hover:bg-slate-300 transition-all"
-                                  >
-                                    전체 해제
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                {students.map(s => {
-                                  const isChecked = (editItemData.targetStudents || []).includes(s.id);
-                                  return (
-                                    <label
-                                      key={s.id}
-                                      className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer border-2 transition-all text-xs font-bold select-none ${isChecked ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'}`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        className="hidden"
-                                        checked={isChecked}
-                                        onChange={(e) => {
-                                          const cur = [...(editItemData.targetStudents || [])];
-                                          if (e.target.checked) cur.push(s.id);
-                                          else cur.splice(cur.indexOf(s.id), 1);
-                                          setEditItemData({ ...editItemData, targetStudents: cur });
-                                        }}
-                                      />
-                                      <UserCheck size={11} className={isChecked ? 'text-white' : 'text-slate-300'} />
-                                      {s.name}
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            </div>
+                            <TargetStudentPicker students={students} classrooms={classrooms}
+                              selected={editItemData.targetStudents || []}
+                              onChange={(ids) => setEditItemData(prev => ({ ...prev, targetStudents: ids }))}
+                              presets={targetPresets} onSavePreset={saveTargetPreset} onDeletePreset={deleteTargetPreset}
+                              pastItems={[...assignments, ...memoItems].filter(x => x.id !== editItemId)} />
                           )}
                         </div>
                         <div className="flex gap-2 pt-1">
@@ -4967,7 +5664,7 @@ export default function App() {
                               <button onClick={() => moveItem('down', a)} className="p-1.5 text-slate-400 bg-slate-50 hover:bg-slate-200 hover:text-slate-700 rounded-lg transition-all shadow-sm leading-none" title="아래로"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3 7l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
                             </div>
                             <button onClick={() => { setEditItemId(a.id); setEditItemData({ ...a }); }} className="p-2.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all shadow-sm"><Edit2 size={18} /></button>
-                            <button onClick={() => deleteItem(regCategory === 'assignment' ? 'assignments' : 'memoItems', a.id)} className="p-2.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all shadow-sm"><Trash2 size={18} /></button>
+                            <button onClick={() => askDelete(regCategory === 'assignment' ? '과제' : '암기 항목', a.title, () => deleteItem(regCategory === 'assignment' ? 'assignments' : 'memoItems', a.id))} className="p-2.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all shadow-sm"><Trash2 size={18} /></button>
                           </div>
                         )}
                       </div>
@@ -5022,95 +5719,8 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      {/* 문항 수 입력 */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">객관식 문항 수</p>
-                          <div className="relative">
-                            <input type="number" min="0" value={selectedTest.mcCount ?? ''} onChange={(e) => {
-                              const cnt = parseInt(e.target.value) || 0;
-                              const existing = (selectedTest.questions || []).filter(q => q.type === '객관식');
-                              const others = (selectedTest.questions || []).filter(q => q.type !== '객관식');
-                              const newQs = Array.from({length: cnt}, (_, i) => existing[i] || {type:'객관식', num:i+1, difficulty:'중', unit:'', detail:''});
-                              setSelectedTest({ ...selectedTest, mcCount: e.target.value, questions: [...newQs, ...others] });
-                            }} placeholder="0" className="w-full pl-4 pr-16 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-orange-400 outline-none" />
-                            <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-black text-slate-400 pointer-events-none">문항</span>
-                          </div>
-                        </div>
-                        <div className="space-y-1.5">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">주관식 문항 수</p>
-                          <div className="relative">
-                            <input type="number" min="0" value={selectedTest.saCount ?? ''} onChange={(e) => {
-                              const cnt = parseInt(e.target.value) || 0;
-                              const existing = (selectedTest.questions || []).filter(q => q.type === '주관식');
-                              const others = (selectedTest.questions || []).filter(q => q.type !== '주관식');
-                              const newQs = Array.from({length: cnt}, (_, i) => existing[i] || {type:'주관식', num:i+1, difficulty:'중', unit:'', detail:''});
-                              setSelectedTest({ ...selectedTest, saCount: e.target.value, questions: [...others, ...newQs] });
-                            }} placeholder="0" className="w-full pl-4 pr-16 py-3 border-2 border-slate-100 rounded-2xl font-bold bg-white focus:border-indigo-400 outline-none" />
-                            <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-black text-slate-400 pointer-events-none">문항</span>
-                          </div>
-                        </div>
-                      </div>
-                      {/* 문항별 세부 정보 입력 */}
-                      {(selectedTest.questions || []).length > 0 && (() => {
-                        const mcQs = (selectedTest.questions || []).filter(q => q.type === '객관식');
-                        const saQs = (selectedTest.questions || []).filter(q => q.type === '주관식');
-                        const updateQ = (type, idx, field, val) => {
-                          const qs = [...(selectedTest.questions || [])];
-                          const target = qs.filter(q => q.type === type)[idx];
-                          if (!target) return;
-                          const gi = qs.indexOf(target);
-                          qs[gi] = { ...target, [field]: val };
-                          setSelectedTest({ ...selectedTest, questions: qs });
-                        };
-                        return (
-                          <div className="space-y-4">
-                            {[{label:'객관식', list:mcQs, color:'orange'}, {label:'주관식', list:saQs, color:'indigo'}].map(({label, list, color}) =>
-                              list.length > 0 && (
-                                <div key={label}>
-                                  <div className={`flex items-center gap-2 mb-2`}>
-                                    <span className={`text-[11px] font-black px-2.5 py-1 bg-${color}-100 text-${color}-600 rounded-xl leading-none`}>{label}</span>
-                                    <span className="text-[10px] font-bold text-slate-400">문항별 정보 입력</span>
-                                  </div>
-                                  <div className="space-y-2.5">
-                                    {list.map((q, i) => (
-                                      <div key={i} className={`border border-${color}-100 rounded-2xl overflow-hidden`}>
-                                        {/* 문항 번호 + 난이도 선택 */}
-                                        <div className={`bg-${color}-50 px-3 py-2 flex items-center gap-2`}>
-                                          <span className={`text-xs font-black text-${color}-700 shrink-0`}>{i+1}번</span>
-                                          <div className="flex gap-1 flex-wrap flex-1">
-                                            {DIFFICULTIES.map(d => (
-                                              <button key={d} onClick={() => updateQ(label, i, 'difficulty', d)}
-                                                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition-all leading-none ${q.difficulty === d ? `bg-${color}-500 border-${color}-500 text-white shadow-sm` : `bg-white border-${color}-200 text-${color}-400`}`}>{d}</button>
-                                            ))}
-                                          </div>
-                                        </div>
-                                        {/* 단원 + 배점 + 세부정보 입력 */}
-                                        <div className="bg-white px-3 py-2.5 space-y-2">
-                                          <div className="flex gap-2">
-                                            <input value={q.unit || ''} onChange={(e) => updateQ(label, i, 'unit', e.target.value)}
-                                              placeholder="출제 단원"
-                                              className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-slate-400 text-slate-700 transition-all" />
-                                            <div className="relative shrink-0 w-24">
-                                              <input type="number" min="0" step="any" value={q.points ?? ''} onChange={(e) => updateQ(label, i, 'points', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                                                placeholder="0"
-                                                className="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:bg-white focus:border-slate-400 text-slate-700 transition-all" />
-                                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 pointer-events-none">점</span>
-                                            </div>
-                                          </div>
-                                          <input value={q.detail || ''} onChange={(e) => updateQ(label, i, 'detail', e.target.value)}
-                                            placeholder="세부 정보 (오답 포인트, 출제 의도 등)"
-                                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:bg-white focus:border-slate-400 text-slate-600 transition-all" />
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )
-                            )}
-                          </div>
-                        );
-                      })()}
+                      {/* 문항 정보 (표 입력 + 일괄 설정) */}
+                      <QuestionEditor test={selectedTest} onChange={(patch) => setSelectedTest(prev => ({ ...prev, ...patch }))} />
                       <BufferedTextarea value={selectedTest.description} onSave={(v) => setSelectedTest({ ...selectedTest, description: v })} className="w-full h-28 p-4 border-2 border-slate-100 rounded-3xl font-medium text-sm bg-white" placeholder="전체 범위 및 메모..." />
                       <button onClick={updateTestDetails} className="w-full py-4 bg-green-600 text-white rounded-xl font-black shadow-lg">저장하기</button>
                     </div>
@@ -5202,6 +5812,12 @@ export default function App() {
                       })()}
                       {selectedTest.description && <p className="text-slate-700 font-black whitespace-pre-wrap leading-relaxed">{selectedTest.description}</p>}
                       {!selectedTest.description && !(selectedTest.questions || []).length && <p className="text-slate-300 font-bold text-sm">등록된 상세 정보가 없습니다.</p>}
+                      {userRole === 'master' && (
+                        <button onClick={() => { const t = selectedTest; setSelectedTest(null); setIsTestEditMode(false); setScoreEntryTest(t); }}
+                          className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black transition-all active:scale-95 flex items-center justify-center gap-2 text-sm shadow-md">
+                          <Edit2 size={16}/> 성적 빠른 입력 (점수·오답·결시)
+                        </button>
+                      )}
                       {/* 출력 버튼 */}
                       {userRole !== 'student' && (() => {
                         const t = selectedTest;
@@ -5444,7 +6060,7 @@ export default function App() {
                     <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">과제 진척도</p>
                     {(() => {
                       const sid = selectedStudent.id;
-                      const rel = assignments.filter(a => a.type === 'all' || a.targetStudents?.includes(sid));
+                      const rel = assignments.filter(a => isItemTarget(a, sid));
                       const done = rel.filter(a => submissions[`${sid}-${a.id}`]?.status === 'completed').length;
                       const incomplete = rel.filter(a => submissions[`${sid}-${a.id}`]?.status === 'incomplete_red').length;
                       const effective = done + incomplete;
@@ -5610,7 +6226,7 @@ export default function App() {
                       tr{page-break-inside:avoid}
                     }</style></head><body>
                     <h1>${s.name}${groupBadgeHtml} 시험 결과</h1>
-                    <p class="meta">${s.highSchool||''}${s.homeroomTeacher?' · '+s.homeroomTeacher:''} · 출력일: ${new Date(Date.now()+9*60*60*1000).toISOString().split('T')[0]}</p>
+                    <p class="meta">${s.highSchool||''}${s.homeroomTeacher?' · '+s.homeroomTeacher:''} · 출력일: ${getKstToday()}</p>
                     <table><thead><tr><th>시험명</th><th style="text-align:center">점수</th><th style="text-align:center">평균대비</th><th>오답 문항</th><th>메모</th></tr></thead>
                     <tbody>${testRows}</tbody></table>
                     <script>window.onload=function(){window.print();window.close();}<\/script></body></html>`);
@@ -5627,6 +6243,17 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* 성적 빠른 입력창 */}
+        {scoreEntryTest && userRole === 'master' && (
+          <ScoreEntryModal
+            key={scoreEntryTest.id}
+            test={tests.find(t => t.id === scoreEntryTest.id) || scoreEntryTest}
+            students={visibleStudentsFiltered}
+            testScores={testScores}
+            onClose={() => setScoreEntryTest(null)}
+            onSave={(payload) => saveScoreEntry(scoreEntryTest.id, payload)} />
         )}
 
         {/* Status Menu Portal */}
@@ -5666,14 +6293,14 @@ export default function App() {
               </div>
               <p className="text-lg font-black text-slate-800 mb-1">정말 삭제할까요?</p>
               <p className="text-sm text-slate-500 font-medium mb-6">
-                <span className="font-black text-slate-700">{confirmDelete.label}</span> 학생을 삭제하면<br/>복구할 수 없습니다.
+                <span className="font-black text-slate-700">{confirmDelete.label}</span> {confirmDelete.kind || '학생'}을(를) 삭제하면<br/>{['시험','과제','암기 항목'].includes(confirmDelete.kind) ? '관련 점수·제출 기록까지 함께 삭제되며 ' : ''}복구할 수 없습니다.
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDelete(null)}
                   className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black transition-all hover:bg-slate-200">
                   취소
                 </button>
-                <button onClick={async () => { await deleteItem(confirmDelete.coll, confirmDelete.id); setConfirmDelete(null); }}
+                <button onClick={async () => { if (confirmDelete.onConfirm) await confirmDelete.onConfirm(); else await deleteItem(confirmDelete.coll, confirmDelete.id); setConfirmDelete(null); }}
                   className="flex-1 py-3 bg-red-500 text-white rounded-2xl font-black shadow-lg hover:bg-red-600 transition-all active:scale-95">
                   삭제
                 </button>
