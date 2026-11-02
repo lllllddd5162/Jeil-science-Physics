@@ -1066,8 +1066,7 @@ export default function App() {
 
   // Core Data
   const [allStudents, setStudents] = useState([]); // 숨긴 학생 포함 전체
-  // 숨김(hidden) 학생은 학생 관리 탭을 제외한 모든 화면·집계·리포트에서 제외
-  const students = useMemo(() => allStudents.filter(s => !s.hidden), [allStudents]);
+  const students = allStudents;
   const [assignments, setAssignments] = useState([]);
   const [memoItems, setMemoItems] = useState([]);
   const [submissions, setSubmissions] = useState({});
@@ -1093,6 +1092,7 @@ export default function App() {
   });
   const [newPlan, setNewPlan] = useState({ subject: '물리', unit: '', memo: '', lessonType: '진도' });
   const [editPlanId, setEditPlanId] = useState(null);
+  const [editPlanFrom, setEditPlanFrom] = useState('day'); // 'day' | 'month' — 수정창을 연 위치 (두 곳에 동시에 열리지 않게)
   const [targetPresets, setTargetPresets] = useState([]); // 저장된 대상 목록
   const [selectedPlanIds, setSelectedPlanIds] = useState({}); // 진도 일괄 선택 { planId: true }
   const [planBulkDate, setPlanBulkDate] = useState('');       // 일괄 이동/복사 대상 날짜
@@ -1115,7 +1115,7 @@ export default function App() {
   const [studentGoals, setStudentGoals] = useState({});
   const [studentSort, setStudentSort] = useState('class'); // 'class' | 'custom' | 'name' | 'school' | 'group'
   const [matrixSort, setMatrixSort] = useState('class'); // 'class' | 'custom' | 'name' | 'school' | 'group'
-  const [showHiddenStudents, setShowHiddenStudents] = useState(true); // 학생 관리: 숨긴 학생 카드 표시 여부
+  const [openClassSections, setOpenClassSections] = useState({}); // 학생 관리: 반별 묶음 펼침 { secId: true }
   const [matrixSchoolFilter, setMatrixSchoolFilter] = useState('all');
   const [matrixGroupFilter, setMatrixGroupFilter] = useState('all');
   const [confirmDelete, setConfirmDelete] = useState(null); // { coll, id, label }
@@ -1624,14 +1624,6 @@ export default function App() {
     await batch.commit();
   };
 
-  // 학생 보이기/숨기기 (여러 명 한 번에 가능)
-  const setStudentsHidden = async (ids, hidden) => {
-    if (userRole !== 'master' || ids.length === 0) return;
-    const batch = writeBatch(db);
-    ids.forEach(id => batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'students', id), { hidden }, { merge: true }));
-    await batch.commit();
-  };
-
   const saveStudentDetails = async () => {
     if (userRole !== 'master') return;
     if (!editStudentId || !editStudentData.name.trim()) return;
@@ -1682,7 +1674,11 @@ export default function App() {
 
   const saveEditPlan = async () => {
     if (userRole !== 'master' || !editPlanId || !editPlanData?.unit.trim()) return;
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', editPlanId), editPlanData, { merge: true });
+    const orig = progressPlans.find(p => p.id === editPlanId);
+    const { id: _omit, ...data } = editPlanData;
+    // 날짜를 바꾸면 옮겨간 날짜의 맨 뒤 순서로
+    if (orig && data.date && data.date !== orig.date) data.sortOrder = progressPlans.filter(p => p.date === data.date).length;
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'progressPlans', editPlanId), data, { merge: true });
     setEditPlanId(null);
     setEditPlanData(null);
   };
@@ -3797,21 +3793,21 @@ export default function App() {
                       {opt.label}
                     </button>
                   ))}
-                  {/* 숨긴 학생 표시 on/off */}
-                  {allStudents.some(s => s.hidden) && (
-                    <button onClick={() => setShowHiddenStudents(v => !v)}
-                      className={`ml-auto flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all ${showHiddenStudents ? 'bg-white border-slate-200 text-slate-500' : 'bg-slate-700 border-slate-700 text-white'}`}>
-                      <span className={`relative w-7 h-4 rounded-full transition-all ${showHiddenStudents ? 'bg-emerald-500' : 'bg-white/30'}`}>
-                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${showHiddenStudents ? 'left-3.5' : 'left-0.5'}`}/>
-                      </span>
-                      숨긴 학생 {allStudents.filter(s => s.hidden).length}명 {showHiddenStudents ? '표시 중' : '감춤'}
-                    </button>
-                  )}
+                  {studentSort === 'class' && (() => {
+                    const secIds = [...classrooms.map(c => c.id), '__none'];
+                    const allOpen = secIds.every(id => openClassSections[id]);
+                    return (
+                      <button onClick={() => setOpenClassSections(allOpen ? {} : Object.fromEntries(secIds.map(id => [id, true])))}
+                        className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 bg-white text-slate-500 hover:border-slate-400">
+                        {allOpen ? <><ChevronDown size={12} className="rotate-180"/> 전체 접기</> : <><ChevronDown size={12}/> 전체 펼치기</>}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(() => {
-                  let base = showHiddenStudents ? [...allStudents] : allStudents.filter(s => !s.hidden);
+                  let base = [...allStudents];
                   if (studentSort === 'class') {
                     // 반별 묶음 헤더 + 반 안에서 가나다순
                     const sortedAll = sortByClassThenName(base, classrooms);
@@ -3820,8 +3816,8 @@ export default function App() {
                     sections.forEach(sec => {
                       const members = sortedAll.filter(s => sec.id === '__none' ? !classrooms.some(c => c.id === s.classroomId) : s.classroomId === sec.id);
                       if (members.length === 0) return;
-                      out.push({ __header: true, id: 'h-' + sec.id, name: sec.name, members });
-                      out.push(...members);
+                      out.push({ __header: true, id: 'h-' + sec.id, secId: sec.id, name: sec.name, members });
+                      if (openClassSections[sec.id]) out.push(...members); // 펼친 반만 카드 표시
                     });
                     return out;
                   }
@@ -3830,29 +3826,23 @@ export default function App() {
                   else if (studentSort === 'group') base.sort((a, b) => (a.group||'z').localeCompare(b.group||'z') || a.name.localeCompare(b.name, 'ko'));
                   return base;
                 })().map(s => s.__header ? (
-                  <div key={s.id} className="md:col-span-2 flex items-center gap-2 pt-2 first:pt-0">
+                  <button key={s.id} onClick={() => setOpenClassSections(p => ({ ...p, [s.secId]: !p[s.secId] }))}
+                    className="md:col-span-2 w-full flex items-center gap-2 px-4 py-3 bg-white rounded-2xl border border-slate-200 shadow-sm hover:bg-slate-50 transition-all text-left">
+                    <ChevronDown size={16} className={`text-slate-400 transition-transform ${openClassSections[s.secId] ? '' : '-rotate-90'}`}/>
                     <span className="px-3 py-1 rounded-xl text-sm font-black text-white shadow-sm" style={{background:'var(--sc)'}}>{s.name}</span>
-                    <span className="text-[11px] font-black text-slate-400">
-                      {s.members.filter(m => !m.hidden).length}명{s.members.some(m => m.hidden) ? ` · 숨김 ${s.members.filter(m => m.hidden).length}` : ''}
-                    </span>
-                    <div className="flex-1 h-px bg-slate-200"/>
-                    {userRole === 'master' && (() => {
-                      const allHidden = s.members.every(m => m.hidden);
-                      return (
-                        <button onClick={() => setStudentsHidden(s.members.map(m => m.id), !allHidden)}
-                          className="px-2.5 py-1 rounded-lg text-[10px] font-black border border-slate-200 bg-white text-slate-500 hover:border-slate-400">
-                          {allHidden ? '반 전체 보이기' : '반 전체 숨기기'}
-                        </button>
-                      );
-                    })()}
-                  </div>
+                    <span className="text-[11px] font-black text-slate-400">{s.members.length}명</span>
+                    {!openClassSections[s.secId] && (
+                      <span className="text-[11px] font-bold text-slate-400 truncate flex-1 min-w-0">{s.members.map(m => m.name).join(' · ')}</span>
+                    )}
+                    <span className="ml-auto text-[10px] font-black text-slate-400 shrink-0">{openClassSections[s.secId] ? '접기' : '펼치기'}</span>
+                  </button>
                 ) : (
                   <div key={s.id}
                     draggable={userRole === 'master' && !editStudentId && studentSort === 'custom'}
                     onDragStart={() => setDragState({ type: 'student', fromId: s.id, overId: null })}
                     onDragOver={(e) => { e.preventDefault(); setDragState(p => ({ ...p, overId: s.id })); }}
                     onDragEnd={() => { if (dragState.fromId && dragState.overId) reorderList('student', dragState.fromId, dragState.overId); setDragState({ type: null, fromId: null, overId: null }); }}
-                    className={`p-6 rounded-3xl border shadow-sm group transition-all text-left leading-none ${s.hidden ? 'bg-slate-100 border-dashed border-slate-300 opacity-60' : 'bg-white border-slate-200'} ${dragState.overId === s.id && dragState.fromId !== s.id ? 'ring-2 ring-indigo-400 scale-[1.01]' : ''} ${userRole === 'master' && !editStudentId && studentSort === 'custom' ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                    className={`p-6 rounded-3xl border shadow-sm group transition-all text-left leading-none bg-white border-slate-200 ${dragState.overId === s.id && dragState.fromId !== s.id ? 'ring-2 ring-indigo-400 scale-[1.01]' : ''} ${userRole === 'master' && !editStudentId && studentSort === 'custom' ? 'cursor-grab active:cursor-grabbing' : ''}`}>
                     {editStudentId === s.id ? (
                       <div className="space-y-4 animate-in slide-in-from-top-2 text-left leading-none">
                         <div className="grid grid-cols-2 gap-3 text-left leading-none">
@@ -3999,7 +3989,6 @@ export default function App() {
                         <div className="space-y-3 flex-1 text-left leading-none">
                           <div className="flex items-center gap-2 text-left leading-none">
                             <span className="font-bold text-xl text-slate-800 leading-none">#{s.studentCode || '000'} {s.name}</span>
-                            {s.hidden && <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-slate-200 text-slate-500 border border-slate-300">숨김</span>}
                             {/* 반 뱃지 */}
                             {userRole !== 'student' && s.classroomId && (() => {
                               const cr = classrooms.find(c => c.id === s.classroomId);
@@ -4029,14 +4018,6 @@ export default function App() {
                         </div>
                         {userRole === 'master' && (
                           <div className="flex flex-col items-end gap-2 leading-none shrink-0">
-                          {/* 보이기/숨기기 토글 (항상 표시) */}
-                          <button onClick={() => setStudentsHidden([s.id], !s.hidden)} title={s.hidden ? '숨김 → 다시 보이기' : '보이는 중 → 숨기기'}
-                            className="flex items-center gap-1.5 text-[10px] font-black text-slate-500">
-                            <span>{s.hidden ? '숨김' : '표시'}</span>
-                            <span className={`relative w-9 h-5 rounded-full transition-all ${s.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${s.hidden ? 'left-0.5' : 'left-[18px]'}`}/>
-                            </span>
-                          </button>
                           <div className="flex flex-col gap-2 md:opacity-0 md:group-hover:opacity-100 transition-all leading-none">
                             <button onClick={() => { setEditStudentId(s.id); setEditStudentData({ name: s.name, studentCode: s.studentCode || '', homeroomTeacher: s.homeroomTeacher || '', highSchool: s.highSchool || '', group: s.group || '', classroomId: s.classroomId || '' }); }} className="p-2 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all shadow-sm leading-none"><Edit2 size={18} /></button>
                             <button onClick={() => setConfirmDelete({ coll: 'students', id: s.id, label: s.name })} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all shadow-sm leading-none"><Trash2 size={18} /></button>
@@ -4091,7 +4072,7 @@ export default function App() {
             const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
             return (
-              <div className="max-w-4xl mx-auto space-y-6 text-left">
+              <div className="space-y-6 text-left">
 
                 {/* 진도율 요약 */}
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
@@ -4291,7 +4272,7 @@ export default function App() {
                     ) : (
                       (plansByDate[progressSelectedDate] || []).map((plan, planIdx, dayArr) => (
                         <div key={plan.id} className={`px-4 md:px-6 py-4 group transition-all ${selectedPlanIds[plan.id] ? 'bg-indigo-50/60' : 'hover:bg-slate-50'}`}>
-                          {editPlanId === plan.id ? (
+                          {editPlanId === plan.id && editPlanFrom === 'day' ? (
                             <div className="space-y-3 animate-in slide-in-from-top-2">
                               {/* 수업 종류 */}
                               <div className="flex flex-wrap gap-1.5">
@@ -4346,7 +4327,7 @@ export default function App() {
                                     <button onClick={() => movePlan(plan, 'down')} disabled={planIdx === dayArr.length - 1} title="아래로"
                                       className="p-0.5 text-slate-400 bg-slate-50 hover:bg-slate-200 rounded-md disabled:opacity-20"><ChevronDown size={12}/></button>
                                   </div>
-                                  <button onClick={() => { setEditPlanId(plan.id); setEditPlanData({ ...plan, lessonType: plan.lessonType || '진도' }); }} className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"><Edit2 size={13} /></button>
+                                  <button onClick={() => { setEditPlanFrom('day'); setEditPlanId(plan.id); setEditPlanData({ ...plan, lessonType: plan.lessonType || '진도' }); }} className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"><Edit2 size={13} /></button>
                                   <button onClick={() => askDelete('진도 계획', plan.unit, () => deletePlan(plan.id))} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-all"><Trash2 size={13} /></button>
                                 </div>
                               )}
@@ -4384,7 +4365,7 @@ export default function App() {
                                   {allSel ? `${calMonthIdx}월 선택 해제` : `${calMonthIdx}월 전체 선택`}
                                 </button>
                               </div>
-                              <div className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
+                              <div className="divide-y divide-slate-50 max-h-[560px] overflow-y-auto">
                                 {dates.map(d => {
                                   const list = byDate[d];
                                   const daySel = list.every(p => selectedPlanIds[p.id]);
@@ -4398,13 +4379,56 @@ export default function App() {
                                         {list.map(p => {
                                           const lt = LESSON_TYPES.find(l => l.id === (p.lessonType || '진도')) || LESSON_TYPES[0];
                                           return (
-                                            <label key={p.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-xl cursor-pointer select-none ${selectedPlanIds[p.id] ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+                                            editPlanId === p.id && editPlanFrom === 'month' ? (
+                                              <div key={p.id} className="p-3 rounded-2xl border-2 border-indigo-200 bg-indigo-50/40 space-y-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                  <select value={editPlanData.lessonType || '진도'} onChange={e => setEditPlanData({ ...editPlanData, lessonType: e.target.value })}
+                                                    className="px-2 py-1.5 rounded-xl border bg-white text-xs font-black outline-none">
+                                                    {LESSON_TYPES.map(l => <option key={l.id} value={l.id}>{l.id}</option>)}
+                                                  </select>
+                                                  <select value={editPlanData.subject} onChange={e => setEditPlanData({ ...editPlanData, subject: e.target.value })}
+                                                    className="px-2 py-1.5 rounded-xl border bg-white text-xs font-black outline-none">
+                                                    {[...new Set([...subjects, editPlanData.subject].filter(Boolean))].map(sub => <option key={sub} value={sub}>{sub}</option>)}
+                                                  </select>
+                                                  <input type="date" value={editPlanData.date || ''} onChange={e => setEditPlanData({ ...editPlanData, date: e.target.value })}
+                                                    className="px-2 py-1.5 rounded-xl border bg-white text-xs font-black outline-none" />
+                                                  <label className="flex items-center gap-1 text-[11px] font-black text-slate-500 select-none cursor-pointer">
+                                                    <input type="checkbox" checked={!!editPlanData.done} onChange={e => setEditPlanData({ ...editPlanData, done: e.target.checked })} className="w-4 h-4 accent-teal-600"/> 완료
+                                                  </label>
+                                                </div>
+                                                <div className="flex flex-col md:flex-row gap-2">
+                                                  <input value={editPlanData.unit || ''} onChange={e => setEditPlanData({ ...editPlanData, unit: e.target.value })} placeholder="단원 / 내용"
+                                                    onKeyDown={e => { if (e.key === 'Enter') saveEditPlan(); if (e.key === 'Escape') { setEditPlanId(null); setEditPlanData(null); } }}
+                                                    className="flex-1 px-3 py-2 rounded-xl border bg-white text-sm font-bold outline-none focus:border-indigo-400 text-slate-800" />
+                                                  <input value={editPlanData.memo || ''} onChange={e => setEditPlanData({ ...editPlanData, memo: e.target.value })} placeholder="메모"
+                                                    onKeyDown={e => { if (e.key === 'Enter') saveEditPlan(); if (e.key === 'Escape') { setEditPlanId(null); setEditPlanData(null); } }}
+                                                    className="flex-1 px-3 py-2 rounded-xl border bg-white text-sm font-medium outline-none focus:border-indigo-400 text-slate-600" />
+                                                  <div className="flex gap-1.5 shrink-0">
+                                                    <button onClick={saveEditPlan} className="px-4 py-2 bg-green-600 text-white rounded-xl font-black text-xs flex items-center gap-1"><Save size={12}/> 저장</button>
+                                                    <button onClick={() => { setEditPlanId(null); setEditPlanData(null); }} className="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs">취소</button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                            <div key={p.id} className={`group/row flex items-center gap-2 px-2 py-1.5 rounded-xl ${selectedPlanIds[p.id] ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+                                              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer select-none">
                                               <input type="checkbox" checked={!!selectedPlanIds[p.id]} onChange={() => togglePlanSelect(p.id)} className="w-4 h-4 accent-indigo-600 shrink-0" />
                                               <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-lg border shrink-0 ${lt.light}`}>{p.lessonType || '진도'}</span>
                                               <span className="text-[10px] font-black text-slate-500 shrink-0">{p.subject}</span>
                                               <span className={`text-xs font-black flex-1 min-w-0 truncate ${p.done ? 'line-through text-slate-400' : 'text-slate-700'}`}>{p.unit}</span>
+                                              {p.memo && <span className="text-[10px] text-slate-400 italic truncate max-w-[160px] hidden md:inline">{p.memo}</span>}
                                               {p.done && <CheckCircle2 size={12} className="text-teal-500 shrink-0"/>}
-                                            </label>
+                                              </label>
+                                              <div className="flex gap-1 shrink-0 md:opacity-0 md:group-hover/row:opacity-100 transition-all">
+                                                <button onClick={() => togglePlanDone(p)} title={p.done ? '미완료로' : '완료 처리'}
+                                                  className={`p-1.5 rounded-lg transition-all ${p.done ? 'text-teal-600 bg-teal-50 hover:bg-teal-100' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'}`}><CheckCircle2 size={13}/></button>
+                                                <button onClick={() => { setEditPlanFrom('month'); setEditPlanId(p.id); setEditPlanData({ ...p, lessonType: p.lessonType || '진도' }); }} title="수정"
+                                                  className="p-1.5 text-indigo-500 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all"><Edit2 size={13}/></button>
+                                                <button onClick={() => askDelete('진도 계획', p.unit, () => deletePlan(p.id))} title="삭제"
+                                                  className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg transition-all"><Trash2 size={13}/></button>
+                                              </div>
+                                            </div>
+                                            )
                                           );
                                         })}
                                       </div>
