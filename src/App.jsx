@@ -228,6 +228,10 @@ const sortByClassThenName = (list, classrooms) => {
 // UTC 기준 toISOString() 사용 시 00~09시에 전날로 찍히는 문제 방지
 const getKstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+// --- 시험 응시 대상 판정: type 없음(예전 시험)·'all' 은 전원 대상 ---
+const isTestTarget = (test, studentId) =>
+  !!test && (!test.type || test.type === 'all' || (Array.isArray(test.targetStudents) && test.targetStudents.includes(studentId)));
+
 // --- 대상 판정 헬퍼: 전체 과제이거나 개별 지정 목록에 포함 ---
 const isItemTarget = (item, studentId) =>
   !!item && (item.type === 'all' || (Array.isArray(item.targetStudents) && item.targetStudents.includes(studentId)));
@@ -888,6 +892,20 @@ function ScoreEntryModal({ test, students, testScores, onClose, onSave }) {
   );
 }
 
+// --- 등록 폼 단계 묶음 (번호 + 제목) ---
+function FormStep({ n, title, sub, children }) {
+  return (
+    <div className="px-5 md:px-6 py-5 border-t border-slate-100">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-6 h-6 rounded-full bg-orange-500 text-white text-xs font-black flex items-center justify-center shrink-0">{n}</span>
+        <span className="font-black text-slate-800">{title}</span>
+        {sub && <span className="text-[11px] font-bold text-slate-400">{sub}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // --- 과제/암기 개별 대상 선택기 ---
 // 반·학교·그룹 묶음 선택, 이름 검색, 반전, 저장된 대상 목록(프리셋), 이전 과제 대상 불러오기
 function TargetStudentPicker({ students, classrooms, selected, onChange, presets = [], onSavePreset, onDeletePreset, pastItems = [] }) {
@@ -1072,7 +1090,7 @@ export default function App() {
   const [submissions, setSubmissions] = useState({});
   const [memoSubmissions, setMemoSubmissions] = useState({});
   const [tests, setTests] = useState([]);
-  const [testScores, setTestScores] = useState({});
+  const [rawTestScores, setTestScores] = useState({});
   const [attendance, setAttendance] = useState({});
   const [attendanceNotes, setAttendanceNotes] = useState({});
   const [makeupDates, setMakeupDates] = useState({});
@@ -1156,8 +1174,26 @@ export default function App() {
     date: getKstToday(), 
     scales: DEFAULT_GRADE_SCALES,
     testType: '중간 테스트',
-    mcCount: '', saCount: ''
+    mcCount: '', saCount: '',
+    type: 'all', targetStudents: []
   });
+  const [testFormOpen, setTestFormOpen] = useState(false);       // 신규 시험 등록 카드 펼침
+  const [openEntryAfterAdd, setOpenEntryAfterAdd] = useState(false); // 등록 후 바로 성적 입력
+
+  // 응시 대상이 아닌 학생은 점수 데이터상 '비대상'으로 간주 (평균·리포트·출력에서 자동 제외)
+  const testScores = useMemo(() => {
+    const out = { ...rawTestScores };
+    tests.forEach(t => {
+      if (!t.type || t.type === 'all') return;
+      students.forEach(st => {
+        if (!isTestTarget(t, st.id)) {
+          const k = `${st.id}-${t.id}`;
+          out[k] = { ...(out[k] || {}), absent: 'excluded', score: null, notTarget: true };
+        }
+      });
+    });
+    return out;
+  }, [rawTestScores, tests, students]);
 
   // --- Logic Hooks ---
   const visibleStudentsFiltered = useMemo(() => {
@@ -1533,15 +1569,20 @@ export default function App() {
   const addTest = async () => {
     if (userRole !== 'master') return;
     if (!newTest.title.trim()) { alert('시험 명칭을 입력해 주세요.'); return; }
+    if (newTest.type === 'individual' && (newTest.targetStudents || []).length === 0) { alert('응시 대상 학생을 1명 이상 선택해 주세요.'); return; }
     const sortOrder = tests.length > 0 ? Math.max(...tests.map(t => t.sortOrder || 0)) + 1 : 0;
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', 't' + Date.now()), { ...newTest, sortOrder });
+    const id = 't' + Date.now();
+    const data = { ...newTest, title: newTest.title.trim(), sortOrder, targetStudents: newTest.type === 'individual' ? newTest.targetStudents : [] };
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tests', id), data);
     setNewTest({
       title: '', source: '', difficulty: '중', description: '',
       date: getKstToday(),
       scales: DEFAULT_GRADE_SCALES,
       testType: newTest.testType,
-      mcCount: '', saCount: '', questions: []
+      mcCount: '', saCount: '', questions: [],
+      type: 'all', targetStudents: []
     });
+    if (openEntryAfterAdd) setScoreEntryTest({ id, ...data });
   };
 
   // 성적 빠른 입력창 저장: 변경된 학생만 일괄 저장
@@ -2803,48 +2844,121 @@ export default function App() {
                 );
               })()}
               {userRole === 'master' && (
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-left text-slate-800">
-                  <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-600 leading-none"><Trophy size={20} /> 신규 시험 등록</h2>
-                  <div className="space-y-3 mb-4">
-                    {/* 모바일: 세로 / 데스크탑: 4열 */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-[10px] uppercase font-black ml-1">실시 일자</p>
-                        <input type="date" value={newTest.date} onChange={(e) => setNewTest({ ...newTest, date: e.target.value })}
-                          className="w-full min-w-0 px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 transition-all text-slate-800 shadow-sm"
-                          style={{WebkitAppearance:'none',appearance:'none'}} />
-                      </div>
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-[10px] uppercase font-black ml-1">시험 명칭</p>
-                        <BufferedInput value={newTest.title} onSave={(v) => setNewTest({ ...newTest, title: v })} placeholder="제목..." className="w-full px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm" />
-                      </div>
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-[10px] uppercase font-black ml-1">출처</p>
-                        <BufferedInput value={newTest.source} onSave={(v) => setNewTest({ ...newTest, source: v })} placeholder="출처..." className="w-full px-3 py-3 rounded-2xl font-bold border bg-slate-50 outline-none shadow-sm" />
-                      </div>
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-[10px] uppercase font-black ml-1">난이도</p>
-                        <select value={newTest.difficulty} onChange={(e) => setNewTest({ ...newTest, difficulty: e.target.value })}
-                          className="w-full px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none shadow-sm">
-                          {DIFFICULTIES.map(d => <option key={d}>{d}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  {/* 테스트 종류 선택 */}
-                  <div className="flex gap-2 mb-4">
-                    {['중간 테스트', '미니 테스트'].map(type => (
-                      <button key={type} onClick={() => setNewTest({ ...newTest, testType: type })}
-                        className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all ${newTest.testType === type ? 'bg-orange-500 border-orange-500 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-orange-300'}`}>
-                        {type === '중간 테스트' ? '📝 중간 테스트 (평균 집계)' : '⚡ 미니 테스트 (평균 제외)'}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mb-3">
-                    <QuestionEditor test={newTest} onChange={(patch) => setNewTest(prev => ({ ...prev, ...patch }))} />
-                  </div>
-                  <BufferedTextarea value={newTest.description} onSave={(v) => setNewTest({ ...newTest, description: v })} placeholder="전체 범위 및 메모..." className="w-full h-20 p-4 border rounded-2xl font-medium text-sm outline-none bg-slate-50 focus:bg-white transition-all text-slate-700 shadow-inner" />
-                  <button onClick={addTest} className="w-full mt-3 bg-orange-500 text-white py-3.5 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all active:scale-95">시험 등록</button>
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm text-left text-slate-800 overflow-hidden">
+                  {/* 헤더 (접기/펼치기) */}
+                  <button onClick={() => setTestFormOpen(v => !v)} className="w-full px-6 py-4 flex items-center gap-2 hover:bg-orange-50/50 transition-all">
+                    <Trophy size={20} className="text-orange-600"/>
+                    <span className="text-lg font-black text-orange-600">신규 시험 등록</span>
+                    {!testFormOpen && <span className="text-[11px] font-bold text-slate-400 ml-1">눌러서 열기</span>}
+                    <ChevronDown size={18} className={`ml-auto text-slate-400 transition-transform ${testFormOpen ? 'rotate-180' : ''}`}/>
+                  </button>
+                  {testFormOpen && (() => {
+                    const qs = newTest.questions || [];
+                    const mcN = qs.filter(q => q.type !== '주관식').length, saN = qs.filter(q => q.type === '주관식').length;
+                    const ptsSum = Math.round(qs.reduce((a, q) => a + (parseFloat(q.points) || 0), 0) * 100) / 100;
+                    const targetN = newTest.type === 'individual' ? (newTest.targetStudents || []).length : students.length;
+                    const copySource = [...tests].reverse().slice(0, 30);
+                    return (
+                      <>
+                        {/* 이전 시험 불러오기 */}
+                        <div className="px-5 md:px-6 py-3 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center gap-2">
+                          <Copy size={14} className="text-slate-400"/>
+                          <span className="text-[11px] font-black text-slate-500">비슷한 시험이 있으면</span>
+                          <select value="" onChange={e => {
+                            const t = tests.find(x => x.id === e.target.value); if (!t) return;
+                            setNewTest(prev => ({
+                              ...prev, source: t.source || '', difficulty: t.difficulty || '중', testType: t.testType || '중간 테스트',
+                              mcCount: t.mcCount || '', saCount: t.saCount || '', description: t.description || '',
+                              questions: (t.questions || []).map(q => ({ ...q })),
+                              type: t.type || 'all', targetStudents: [...(t.targetStudents || [])],
+                            }));
+                          }} className="px-3 py-1.5 rounded-xl border bg-white text-[11px] font-black text-slate-600 outline-none max-w-[260px]">
+                            <option value="">이전 시험 구성 불러오기…</option>
+                            {copySource.map(t => <option key={t.id} value={t.id}>{t.date} {t.title}</option>)}
+                          </select>
+                          <span className="text-[10px] font-bold text-slate-400">문항·배점·단원·대상까지 복사 (제목·날짜는 새로)</span>
+                        </div>
+
+                        <FormStep n="1" title="기본 정보">
+                          <div className="flex gap-2 mb-3">
+                            {['중간 테스트', '미니 테스트'].map(type => (
+                              <button key={type} onClick={() => setNewTest(prev => ({ ...prev, testType: type }))}
+                                className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl text-xs font-black border-2 transition-all ${newTest.testType === type ? 'bg-orange-500 border-orange-500 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-400 hover:border-orange-300'}`}>
+                                {type === '중간 테스트' ? '📝 중간 테스트 · 평균 집계' : '⚡ 미니 테스트 · 평균 제외'}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-[160px_1fr_200px] gap-3">
+                            <label className="space-y-1 min-w-0">
+                              <span className="text-[10px] font-black text-slate-400 ml-1">실시 일자</span>
+                              <input type="date" value={newTest.date} onChange={(e) => setNewTest(prev => ({ ...prev, date: e.target.value }))}
+                                className="w-full min-w-0 px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 text-slate-800"
+                                style={{WebkitAppearance:'none',appearance:'none'}} />
+                            </label>
+                            <label className="space-y-1 min-w-0">
+                              <span className="text-[10px] font-black text-slate-400 ml-1">시험 명칭 <span className="text-red-400">*</span></span>
+                              <input value={newTest.title} onChange={(e) => setNewTest(prev => ({ ...prev, title: e.target.value }))} placeholder="예) 11월 2주차 전기장 테스트"
+                                className="w-full px-4 py-3 rounded-2xl border bg-slate-50 font-black outline-none focus:border-orange-500 focus:bg-white text-slate-800" />
+                            </label>
+                            <label className="space-y-1 min-w-0">
+                              <span className="text-[10px] font-black text-slate-400 ml-1">출처</span>
+                              <input value={newTest.source} onChange={(e) => setNewTest(prev => ({ ...prev, source: e.target.value }))} placeholder="예) 자체제작, 기출"
+                                className="w-full px-3 py-3 rounded-2xl border bg-slate-50 font-bold outline-none focus:border-orange-500 focus:bg-white text-slate-800" />
+                            </label>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-400 mr-1">전체 난이도</span>
+                            {DIFFICULTIES.map(d => (
+                              <button key={d} onClick={() => setNewTest(prev => ({ ...prev, difficulty: d }))}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition-all ${newTest.difficulty === d ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-orange-300'}`}>{d}</button>
+                            ))}
+                          </div>
+                        </FormStep>
+
+                        <FormStep n="2" title="응시 대상" sub={newTest.type === 'individual' ? `${targetN}명 선택됨` : '전체 학생'}>
+                          <div className="flex gap-2 mb-3">
+                            <button onClick={() => setNewTest(prev => ({ ...prev, type: 'all', targetStudents: [] }))}
+                              className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${newTest.type !== 'individual' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>전체 학생</button>
+                            <button onClick={() => setNewTest(prev => ({ ...prev, type: 'individual' }))}
+                              className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${newTest.type === 'individual' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>반 · 학생 선택</button>
+                          </div>
+                          {newTest.type === 'individual' && (
+                            <TargetStudentPicker students={students} classrooms={classrooms}
+                              selected={newTest.targetStudents || []}
+                              onChange={(ids) => setNewTest(prev => ({ ...prev, targetStudents: ids }))}
+                              presets={targetPresets} onSavePreset={saveTargetPreset} onDeletePreset={deleteTargetPreset}
+                              pastItems={[...tests, ...assignments, ...memoItems]} />
+                          )}
+                        </FormStep>
+
+                        <FormStep n="3" title="문항 구성" sub="선택 · 입력하면 오답 분석·점수 자동 계산이 됩니다">
+                          <QuestionEditor test={newTest} onChange={(patch) => setNewTest(prev => ({ ...prev, ...patch }))} />
+                        </FormStep>
+
+                        <FormStep n="4" title="시험 범위 · 메모" sub="선택">
+                          <textarea value={newTest.description} onChange={(e) => setNewTest(prev => ({ ...prev, description: e.target.value }))} placeholder="전체 범위 및 메모..."
+                            className="w-full h-20 p-4 border rounded-2xl font-medium text-sm outline-none bg-slate-50 focus:bg-white text-slate-700 resize-y" />
+                        </FormStep>
+
+                        {/* 요약 + 등록 */}
+                        <div className="sticky bottom-0 px-5 md:px-6 py-4 border-t border-slate-200 bg-white/95 backdrop-blur flex flex-col md:flex-row md:items-center gap-3">
+                          <div className="flex flex-wrap gap-1.5 text-[11px] font-black flex-1">
+                            <span className="px-2 py-1 rounded-lg bg-orange-50 text-orange-600">{newTest.testType}</span>
+                            <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600">{newTest.date}</span>
+                            <span className={`px-2 py-1 rounded-lg ${newTest.title.trim() ? 'bg-slate-100 text-slate-700' : 'bg-red-50 text-red-400'}`}>{newTest.title.trim() || '제목 없음'}</span>
+                            <span className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600">대상 {targetN}명</span>
+                            {qs.length > 0 && <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600">객{mcN} · 주{saN}</span>}
+                            {ptsSum > 0 && <span className={`px-2 py-1 rounded-lg ${ptsSum === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>배점 {ptsSum}점</span>}
+                          </div>
+                          <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-500 select-none cursor-pointer shrink-0">
+                            <input type="checkbox" checked={openEntryAfterAdd} onChange={e => setOpenEntryAfterAdd(e.target.checked)} className="w-4 h-4 accent-orange-600"/>
+                            등록 후 바로 성적 입력
+                          </label>
+                          <button onClick={addTest} className="md:w-40 bg-orange-500 text-white py-3 rounded-2xl font-black shadow-lg hover:bg-orange-600 transition-all active:scale-95 shrink-0">시험 등록</button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
               {/* ── 중간 테스트 섹션 ── */}
@@ -2868,13 +2982,14 @@ export default function App() {
                       <div className="px-4 md:px-6 py-3 border-t border-slate-100 bg-orange-50/40 flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-black text-slate-400 mr-1">✏️ 성적 입력</span>
                         {mainTests.map(t => {
-                          const filled = visibleStudentsFiltered.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
-                          const full = filled === visibleStudentsFiltered.length && filled > 0;
+                          const targetSts = visibleStudentsFiltered.filter(st => isTestTarget(t, st.id));
+                          const filled = targetSts.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
+                          const full = filled === targetSts.length && filled > 0;
                           return (
                             <button key={t.id} onClick={() => setScoreEntryTest(t)}
                               className={`px-3 py-1.5 rounded-xl text-[11px] font-black border-2 transition-all flex items-center gap-1.5 ${full ? 'bg-white border-emerald-200 text-emerald-600 hover:border-emerald-400' : 'bg-white border-orange-200 text-orange-600 hover:border-orange-400'}`}>
                               {t.title}
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-orange-100'}`}>{filled}/{visibleStudentsFiltered.length}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-orange-100'}`}>{filled}/{targetSts.length}</span>
                             </button>
                           );
                         })}
@@ -2884,7 +2999,7 @@ export default function App() {
                       <>
                         {/* 모바일 카드형 */}
                         <div className="block md:hidden border-t border-slate-100 divide-y divide-slate-100">
-                          {visibleStudentsFiltered.map(s => (
+                          {visibleStudentsFiltered.filter(s => mainTests.some(t => isTestTarget(t, s.id))).map(s => (
                             <div key={s.id} className="p-4">
                               <div className="flex items-center justify-between mb-3">
                                 <span className="font-black text-slate-800">{s.name}</span>
@@ -2892,6 +3007,7 @@ export default function App() {
                               </div>
                               <div className="space-y-2">
                                 {mainTests.map(t => {
+                                  if (!isTestTarget(t, s.id)) return null; // 응시 대상 아님
                                   const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '', wrongNums: [] };
                                   const score = res.score;
                                   const allQs = t.questions || [];
@@ -3025,7 +3141,7 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-slate-700">
-                              {visibleStudentsFiltered.map(s => (
+                              {visibleStudentsFiltered.filter(s => mainTests.some(t => isTestTarget(t, s.id))).map(s => (
                                 <tr key={s.id}>
                                   <td className="p-4 font-bold sticky left-0 bg-white z-10 border-r text-center">
                                     <div className="flex items-center justify-center gap-1.5">
@@ -3034,6 +3150,7 @@ export default function App() {
                                     </div>
                                   </td>
                                   {mainTests.map(t => {
+                                    if (!isTestTarget(t, s.id)) return <td key={t.id} className="p-3 text-center align-middle bg-slate-50/60 text-[10px] font-black text-slate-300">대상 아님</td>;
                                     const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '', wrongNums: [], partialScores: {} };
                                     const score = res.score;
                                     const allQs = t.questions || [];
@@ -3192,13 +3309,14 @@ export default function App() {
                       <div className="px-4 md:px-6 py-3 border-t border-slate-100 bg-slate-50/40 flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-black text-slate-400 mr-1">✏️ 성적 입력</span>
                         {miniTests.map(t => {
-                          const filled = visibleStudentsFiltered.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
-                          const full = filled === visibleStudentsFiltered.length && filled > 0;
+                          const targetSts = visibleStudentsFiltered.filter(st => isTestTarget(t, st.id));
+                          const filled = targetSts.filter(st => { const r = testScores[`${st.id}-${t.id}`]; return r?.absent || (r?.score != null && r?.score !== ''); }).length;
+                          const full = filled === targetSts.length && filled > 0;
                           return (
                             <button key={t.id} onClick={() => setScoreEntryTest(t)}
                               className={`px-3 py-1.5 rounded-xl text-[11px] font-black border-2 transition-all flex items-center gap-1.5 ${full ? 'bg-white border-emerald-200 text-emerald-600 hover:border-emerald-400' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'}`}>
                               {t.title}
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-slate-100'}`}>{filled}/{visibleStudentsFiltered.length}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${full ? 'bg-emerald-100' : 'bg-slate-100'}`}>{filled}/{targetSts.length}</span>
                             </button>
                           );
                         })}
@@ -3208,7 +3326,7 @@ export default function App() {
                       <>
                         {/* 모바일 카드형 */}
                         <div className="block md:hidden border-t border-slate-100 divide-y divide-slate-100">
-                          {visibleStudentsFiltered.map(s => (
+                          {visibleStudentsFiltered.filter(s => miniTests.some(t => isTestTarget(t, s.id))).map(s => (
                             <div key={s.id} className="p-4">
                               <div className="flex items-center justify-between mb-3">
                                 <span className="font-black text-slate-800">{s.name}</span>
@@ -3216,6 +3334,7 @@ export default function App() {
                               </div>
                               <div className="space-y-2">
                                 {miniTests.map(t => {
+                                  if (!isTestTarget(t, s.id)) return null; // 응시 대상 아님
                                   const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '', wrongNums: [] };
                                   const score = res.score;
                                   const allQs = t.questions || [];
@@ -3320,12 +3439,13 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-slate-700">
-                              {visibleStudentsFiltered.map(s => (
+                              {visibleStudentsFiltered.filter(s => miniTests.some(t => isTestTarget(t, s.id))).map(s => (
                                 <tr key={s.id}>
                                   <td className="p-4 font-bold sticky left-0 bg-white z-10 border-r text-center">
                                     <span className="font-black text-slate-800">{s.name}</span>
                                   </td>
                                   {miniTests.map(t => {
+                                    if (!isTestTarget(t, s.id)) return <td key={t.id} className="p-3 text-center align-middle bg-slate-50/60 text-[10px] font-black text-slate-300">대상 아님</td>;
                                     const res = testScores[`${s.id}-${t.id}`] || { score: '', plan: '', wrongNums: [] };
                                     const score = res.score;
                                     const allQs = t.questions || [];
@@ -5890,6 +6010,23 @@ export default function App() {
                           ))}
                         </div>
                       </div>
+                      {/* 응시 대상 */}
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">응시 대상</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => setSelectedTest(prev => ({ ...prev, type: 'all', targetStudents: [] }))}
+                            className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${selectedTest.type !== 'individual' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>전체 학생</button>
+                          <button onClick={() => setSelectedTest(prev => ({ ...prev, type: 'individual', targetStudents: prev.targetStudents || [] }))}
+                            className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${selectedTest.type === 'individual' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>반 · 학생 선택</button>
+                        </div>
+                        {selectedTest.type === 'individual' && (
+                          <TargetStudentPicker students={students} classrooms={classrooms}
+                            selected={selectedTest.targetStudents || []}
+                            onChange={(ids) => setSelectedTest(prev => ({ ...prev, targetStudents: ids }))}
+                            presets={targetPresets} onSavePreset={saveTargetPreset} onDeletePreset={deleteTargetPreset}
+                            pastItems={[...tests, ...assignments, ...memoItems].filter(x => x.id !== selectedTest.id)} />
+                        )}
+                      </div>
                       {/* 문항 정보 (표 입력 + 일괄 설정) */}
                       <QuestionEditor test={selectedTest} onChange={(patch) => setSelectedTest(prev => ({ ...prev, ...patch }))} />
                       <BufferedTextarea value={selectedTest.description} onSave={(v) => setSelectedTest({ ...selectedTest, description: v })} className="w-full h-28 p-4 border-2 border-slate-100 rounded-3xl font-medium text-sm bg-white" placeholder="전체 범위 및 메모..." />
@@ -5897,6 +6034,12 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="space-y-4">
+                      {selectedTest.type === 'individual' && (
+                        <div className="flex items-start gap-2 bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-3">
+                          <Users size={14} className="text-indigo-500 mt-0.5 shrink-0"/>
+                          <p className="text-xs font-black text-indigo-700 leading-relaxed">응시 대상 {(selectedTest.targetStudents || []).length}명 · <span className="font-bold text-indigo-500">{getTargetStudentNamesLocal(students, selectedTest.targetStudents)}</span></p>
+                        </div>
+                      )}
                       {/* 날짜 / 난이도 / 출처 정보 카드 */}
                       <div className="grid grid-cols-3 gap-3">
                         <div className="flex flex-col items-center gap-1.5 bg-white border border-slate-100 rounded-2xl py-4 px-2 shadow-sm">
@@ -6259,7 +6402,7 @@ export default function App() {
                   <div className="space-y-1.5">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1"><Trophy size={12} className="text-orange-400"/> 시험별 점수</p>
                     <div className="space-y-2">
-                      {tests.map(t => {
+                      {tests.filter(t => isTestTarget(t, selectedStudent.id)).map(t => {
                         const sc = testScores[`${selectedStudent.id}-${t.id}`];
                         const score = sc?.score;
                         const avg = parseFloat(stats.testAverages[t.id] || 0);
@@ -6421,8 +6564,8 @@ export default function App() {
           <ScoreEntryModal
             key={scoreEntryTest.id}
             test={tests.find(t => t.id === scoreEntryTest.id) || scoreEntryTest}
-            students={visibleStudentsFiltered}
-            testScores={testScores}
+            students={visibleStudentsFiltered.filter(st => isTestTarget(tests.find(t => t.id === scoreEntryTest.id) || scoreEntryTest, st.id))}
+            testScores={rawTestScores}
             onClose={() => setScoreEntryTest(null)}
             onSave={(payload) => saveScoreEntry(scoreEntryTest.id, payload)} />
         )}
