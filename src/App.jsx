@@ -1074,6 +1074,7 @@ export default function App() {
   const [subjects, setSubjects] = useState(['물리', '화학', '생명과학', '지구과학', '통합과학']);
   const [editingSubjects, setEditingSubjects] = useState(false);
   const [subjectInput, setSubjectInput] = useState('');
+  const [renamingSubject, setRenamingSubject] = useState(null); // { from, text } 과목명 수정 중
   const [progressPlans, setProgressPlans] = useState([]);
   const [progressCalMonth, setProgressCalMonth] = useState(() => {
     const k = new Date(Date.now() + 9*60*60*1000);
@@ -1477,6 +1478,24 @@ export default function App() {
     await batch.commit();
     setOpenBulkMenu(null);
     setBulkDatePopup(null);
+  };
+
+  // 과목명 변경: 과목 목록 + 이 과목을 쓰는 과제·암기·진도 항목까지 한 번에 변경
+  const renameSubject = async (from, toRaw) => {
+    if (userRole !== 'master') return;
+    const to = (toRaw || '').trim();
+    setRenamingSubject(null);
+    if (!to || to === from) return;
+    if (subjects.includes(to)) { alert(`'${to}' 과목이 이미 있습니다.`); return; }
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), { subjects: subjects.map(x => x === from ? to : x) }, { merge: true });
+    [['assignments', assignments], ['memoItems', memoItems], ['progressPlans', progressPlans]].forEach(([coll, list]) => {
+      list.filter(it => it.subject === from).forEach(it => batch.set(doc(db, 'artifacts', appId, 'public', 'data', coll, it.id), { subject: to }, { merge: true }));
+    });
+    await batch.commit();
+    // 입력 폼에 선택돼 있던 과목도 따라 바꿈
+    setNewAssignment(prev => prev.subject === from ? { ...prev, subject: to } : prev);
+    setNewPlan(prev => prev.subject === from ? { ...prev, subject: to } : prev);
   };
 
   const saveTargetPreset = async (name, ids) => {
@@ -5497,15 +5516,39 @@ export default function App() {
                       </button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {subjects.map((sub, i) => (
-                        <div key={sub} className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-black border ${editingSubjects ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                          {sub}
-                          {editingSubjects && (
-                            <button onClick={() => { const nl = subjects.filter((_,j) => j !== i); saveSubjects(nl); }}
-                              className="ml-1 text-indigo-300 hover:text-red-500 transition-colors font-black leading-none">×</button>
-                          )}
-                        </div>
-                      ))}
+                      {subjects.map((sub, i) => {
+                        const usedCount = [...assignments, ...memoItems, ...progressPlans].filter(it => it.subject === sub).length;
+                        if (editingSubjects && renamingSubject?.from === sub) {
+                          return (
+                            <div key={sub} className="flex items-center gap-1">
+                              <input autoFocus value={renamingSubject.text}
+                                onChange={e => setRenamingSubject({ from: sub, text: e.target.value })}
+                                onKeyDown={e => { if (e.key === 'Enter') renameSubject(sub, renamingSubject.text); if (e.key === 'Escape') setRenamingSubject(null); }}
+                                onBlur={() => renameSubject(sub, renamingSubject.text)}
+                                className="px-3 py-1.5 rounded-xl text-sm font-black border-2 border-indigo-400 bg-white outline-none text-indigo-700"
+                                style={{ width: `${Math.max(6, renamingSubject.text.length + 2)}em` }} />
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={sub} className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-black border ${editingSubjects ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                            {editingSubjects ? (
+                              <button onClick={() => setRenamingSubject({ from: sub, text: sub })} title="눌러서 이름 수정"
+                                className="flex items-center gap-1 hover:underline decoration-dotted underline-offset-4">
+                                {sub}<Edit2 size={11} className="opacity-50"/>
+                              </button>
+                            ) : sub}
+                            {editingSubjects && (
+                              <button onClick={() => {
+                                if (usedCount > 0) {
+                                  askDelete('과목', sub, () => saveSubjects(subjects.filter((_, j) => j !== i)));
+                                } else saveSubjects(subjects.filter((_, j) => j !== i));
+                              }}
+                                className="ml-1 text-indigo-300 hover:text-red-500 transition-colors font-black leading-none">×</button>
+                            )}
+                          </div>
+                        );
+                      })}
                       {editingSubjects && (
                         <div className="flex items-center gap-1">
                           <input
@@ -5520,7 +5563,7 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    {editingSubjects && <p className="text-[10px] text-slate-400 font-medium mt-3">Enter 또는 + 버튼으로 추가 · × 로 삭제</p>}
+                    {editingSubjects && <p className="text-[10px] text-slate-400 font-medium mt-3">과목명 클릭 → 이름 수정 (Enter 저장 · Esc 취소, 등록된 과제·암기·진도 항목도 함께 변경) · Enter 또는 + 버튼으로 추가 · × 로 삭제</p>}
                   </div>
                 );
               })()}
@@ -6293,7 +6336,7 @@ export default function App() {
               </div>
               <p className="text-lg font-black text-slate-800 mb-1">정말 삭제할까요?</p>
               <p className="text-sm text-slate-500 font-medium mb-6">
-                <span className="font-black text-slate-700">{confirmDelete.label}</span> {confirmDelete.kind || '학생'}을(를) 삭제하면<br/>{['시험','과제','암기 항목'].includes(confirmDelete.kind) ? '관련 점수·제출 기록까지 함께 삭제되며 ' : ''}복구할 수 없습니다.
+                <span className="font-black text-slate-700">{confirmDelete.label}</span> {confirmDelete.kind || '학생'}을(를) 삭제하면<br/>{['시험','과제','암기 항목'].includes(confirmDelete.kind) ? '관련 점수·제출 기록까지 함께 삭제되며 ' : ''}{confirmDelete.kind === '과목' ? '목록에서만 빠지고 등록된 항목은 남습니다(현황표엔 그대로 표시). ' : '복구할 수 없습니다.'}
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDelete(null)}
